@@ -3,6 +3,7 @@ This file contains constants used in the project.
 """
 
 #region Screenshot Capture Constants
+screenshots_output_dir_name = "screenshots"
 monitor_number_where_the_screenshot_is_taken = 1
 screenshot_area = {
     "pixels_from_top": 100,  # 100px from the top

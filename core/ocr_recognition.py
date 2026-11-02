@@ -1,0 +1,2 @@
+class OcrRecognition:
+    pass

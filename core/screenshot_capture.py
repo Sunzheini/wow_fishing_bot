@@ -5,13 +5,14 @@ import mss.tools
 from time import sleep
 
 from support.constants import monitor_number_where_the_screenshot_is_taken, period_of_screenshotting, \
-    wait_time_between_screenshots, screenshot_area
+    wait_time_between_screenshots, screenshot_area, screenshots_output_dir_name
 
 
 class ScreenshotCapture:
     def __init__(self):
         # Choose where screenshots are saved; created automatically if it doesn't exist
-        self.output_dir = Path(__file__).parent / "screenshots"
+        project_root = Path(__file__).parent.parent
+        self.output_dir = project_root / screenshots_output_dir_name
         self.output_dir.mkdir(exist_ok=True)
 
     @staticmethod
