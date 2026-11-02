@@ -1,0 +1,20 @@
+# Generated at runtime - not part of source
+/logs/
+/screenshots/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment
+.venv/
+
+# Testing
+.pytest_cache/
+
+# IDE
+.idea/
+
+# Environment variables
+.env

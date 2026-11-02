@@ -80,8 +80,9 @@ def test_get_information_of_monitor_matches_real_mss_monitors():
     """
     with MSS() as sct:
         expected_mon = sct.monitors[monitor_number_where_the_screenshot_is_taken]
-
-    actual_mon = ScreenshotCapture._ScreenshotCapture__get_information_of_monitor()
+        actual_mon = ScreenshotCapture._ScreenshotCapture__get_information_of_monitor(
+            sct, monitor_number_where_the_screenshot_is_taken
+        )
 
     assert actual_mon == expected_mon
 

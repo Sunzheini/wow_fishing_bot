@@ -14,3 +14,12 @@ screenshot_area = {
 period_of_screenshotting = 5
 wait_time_between_screenshots = 0.2  # 200 milliseconds
 #endregion
+
+#region Logging Constants
+log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+log_date_format = "%Y-%m-%d %H:%M:%S"
+logs_output_dir_name = "logs"
+log_file_name = "app.log"
+max_log_file_size_bytes = 5 * 1024 * 1024  # 5 MB
+log_backup_count = 5  # keep up to 5 rotated log files
+#endregion
