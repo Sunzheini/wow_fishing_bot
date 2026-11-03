@@ -8,7 +8,9 @@ from mss import MSS
 
 import core.screenshot_capture as screenshot_capture_module
 from core.screenshot_capture import ScreenshotCapture
-from support.constants import screenshots_output_dir_name, period_of_screenshotting, screenshot_area, \
+from core.screenshot_frame import ScreenshotFrame
+from support.app_error_handling import InvalidMonitorError
+from support.constants import screenshots_output_dir_name, screenshot_area, \
     monitor_number_where_the_screenshot_is_taken
 
 
@@ -49,27 +51,88 @@ def test_output_dir_is_created(objects):
     assert screenshot_capture.output_dir.exists()
 
 
-def test_capture_screenshots_creates_real_screenshot_files(objects):
+def test_capture_screenshot_creates_real_screenshot_file(objects, monkeypatch):
     """
     Real (unmocked) test: actually grabs the screen via mss and makes
-    sure the produced PNG files exist on disk with the expected count
-    and dimensions, matching the real values from support.constants.
+    sure the produced PNG file exists on disk with the expected
+    dimensions, matching the real values from support.constants.
     """
+    monkeypatch.setattr(screenshot_capture_module, "capture_full_screen", False)
+
     screenshot_capture = objects['screenshot_capture']
-    screenshot_capture.capture_screenshots()
+    screenshot_capture.capture_screenshot(0)
 
     created_files = sorted(screenshot_capture.output_dir.glob("*.png"))
-    assert len(created_files) == period_of_screenshotting
+    assert len(created_files) == 1
 
     expected_width = screenshot_area["width"]
     expected_height = screenshot_area["height"]
 
-    for file_path in created_files:
+    image = cv2.imread(str(created_files[0]))
+    assert image is not None
+    height, width = image.shape[:2]
+    assert width == expected_width
+    assert height == expected_height
+
+
+def test_capture_screenshot_returns_screenshot_frame(objects, monkeypatch):
+    """
+    capture_screenshot() must return a ScreenshotFrame whose image matches
+    the configured dimensions and whose origin matches the monitor offset.
+    """
+    monkeypatch.setattr(screenshot_capture_module, "capture_full_screen", False)
+
+    with MSS() as sct:
+        mon = sct.monitors[monitor_number_where_the_screenshot_is_taken]
+
+    expected_top = mon["top"] + screenshot_area["pixels_from_top"]
+    expected_left = mon["left"] + screenshot_area["pixels_from_left"]
+
+    screenshot_capture = objects['screenshot_capture']
+    frame = screenshot_capture.capture_screenshot(0)
+
+    assert isinstance(frame, ScreenshotFrame)
+    assert frame.origin == (expected_left, expected_top)
+    assert frame.image.shape[0] == screenshot_area["height"]
+    assert frame.image.shape[1] == screenshot_area["width"]
+    assert frame.image.shape[2] == 3  # BGR, no alpha channel
+    assert isinstance(frame.timestamp, float)
+
+
+def test_multiple_consecutive_captures_keep_all_files_and_frames(objects, monkeypatch):
+    """
+    Calling capture_screenshot() several times in a row must:
+      - keep every previously saved file on disk (no overwrites/deletions),
+      - create exactly one new file per call,
+      - return a valid ScreenshotFrame for each call.
+    """
+    monkeypatch.setattr(screenshot_capture_module, "capture_full_screen", False)
+
+    screenshot_capture = objects['screenshot_capture']
+    num_screenshots = 4
+    frames = []
+
+    for screenshot_number in range(num_screenshots):
+        frame = screenshot_capture.capture_screenshot(screenshot_number)
+        frames.append(frame)
+
+        # After each call, exactly screenshot_number + 1 files should exist.
+        existing_files = sorted(screenshot_capture.output_dir.glob("*.png"))
+        assert len(existing_files) == screenshot_number + 1
+
+    # All frames returned are proper ScreenshotFrame instances with image data.
+    assert len(frames) == num_screenshots
+    for frame in frames:
+        assert isinstance(frame, ScreenshotFrame)
+        assert frame.image.shape[0] == screenshot_area["height"]
+        assert frame.image.shape[1] == screenshot_area["width"]
+
+    # Final state: one distinct, readable file per call, all still present.
+    final_files = sorted(screenshot_capture.output_dir.glob("*.png"))
+    assert len(final_files) == num_screenshots
+    for file_path in final_files:
         image = cv2.imread(str(file_path))
         assert image is not None
-        height, width = image.shape[:2]
-        assert width == expected_width
-        assert height == expected_height
 
 
 def test_get_information_of_monitor_matches_real_mss_monitors():
@@ -87,12 +150,42 @@ def test_get_information_of_monitor_matches_real_mss_monitors():
     assert actual_mon == expected_mon
 
 
-def test_filenames_match_expected_pattern_and_monitor_offsets(objects):
+def test_get_information_of_monitor_raises_for_invalid_monitor_number():
+    """
+    An out-of-range monitor number must raise InvalidMonitorError
+    instead of letting a raw IndexError leak out.
+    """
+    with MSS() as sct:
+        invalid_monitor_number = len(sct.monitors) + 10
+        with pytest.raises(InvalidMonitorError):
+            ScreenshotCapture._ScreenshotCapture__get_information_of_monitor(
+                sct, invalid_monitor_number
+            )
+
+
+def test_capture_screenshot_propagates_invalid_monitor_error(objects, monkeypatch):
+    """
+    capture_screenshot() is decorated with handle_errors(), whose default
+    behavior is to log and re-raise. An invalid configured monitor number
+    should surface as InvalidMonitorError to the caller.
+    """
+    monkeypatch.setattr(
+        screenshot_capture_module, "monitor_number_where_the_screenshot_is_taken", 999
+    )
+
+    screenshot_capture = objects['screenshot_capture']
+    with pytest.raises(InvalidMonitorError):
+        screenshot_capture.capture_screenshot(0)
+
+
+def test_filenames_match_expected_pattern_and_monitor_offsets(objects, monkeypatch):
     """
     Checks that every produced filename follows the documented pattern
     and encodes the correct monitor offsets (mon["top"] + pixels_from_top,
     mon["left"] + pixels_from_left) and dimensions from screenshot_area.
     """
+    monkeypatch.setattr(screenshot_capture_module, "capture_full_screen", False)
+
     with MSS() as sct:
         mon = sct.monitors[monitor_number_where_the_screenshot_is_taken]
 
@@ -102,10 +195,12 @@ def test_filenames_match_expected_pattern_and_monitor_offsets(objects):
     expected_height = screenshot_area["height"]
 
     screenshot_capture = objects['screenshot_capture']
-    screenshot_capture.capture_screenshots()
+    num_screenshots = 3
+    for screenshot_number in range(num_screenshots):
+        screenshot_capture.capture_screenshot(screenshot_number)
 
     created_files = sorted(screenshot_capture.output_dir.glob("*.png"))
-    assert len(created_files) == period_of_screenshotting
+    assert len(created_files) == num_screenshots
 
     seen_indices = set()
     for file_path in created_files:
@@ -119,24 +214,27 @@ def test_filenames_match_expected_pattern_and_monitor_offsets(objects):
         assert int(match.group("height")) == expected_height
 
         index = int(match.group("index"))
-        assert 0 <= index < period_of_screenshotting
+        assert 0 <= index < num_screenshots
         seen_indices.add(index)
 
-    assert seen_indices == set(range(period_of_screenshotting))
+    assert seen_indices == set(range(num_screenshots))
 
 
-def test_capture_screenshots_with_zero_period_creates_no_files(objects, monkeypatch):
+def test_capture_screenshot_full_screen_matches_monitor_dimensions(objects):
     """
-    Edge case: if period_of_screenshotting is 0, capture_screenshots()
-    should run without error and produce no files.
+    When capture_full_screen is True (the default), the captured frame
+    must cover the entire configured monitor, not the cropped
+    screenshot_area, regardless of screenshot_area's values.
     """
-    monkeypatch.setattr(screenshot_capture_module, "period_of_screenshotting", 0)
+    with MSS() as sct:
+        mon = sct.monitors[monitor_number_where_the_screenshot_is_taken]
 
     screenshot_capture = objects['screenshot_capture']
-    screenshot_capture.capture_screenshots()
+    frame = screenshot_capture.capture_screenshot(0)
 
-    created_files = list(screenshot_capture.output_dir.glob("*.png"))
-    assert created_files == []
+    assert frame.origin == (mon["left"], mon["top"])
+    assert frame.image.shape[0] == mon["height"]
+    assert frame.image.shape[1] == mon["width"]
 
 
 @pytest.fixture(scope="session", autouse=True)
