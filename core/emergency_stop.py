@@ -22,8 +22,16 @@ class EmergencyStop:
         logger.info("Emergency stop hotkey registered: '%s'", emergency_stop_hotkey)
 
     def _on_hotkey_pressed(self) -> None:
+        self.request_stop()
+
+    def request_stop(self) -> None:
+        """
+        Requests an immediate stop. Called internally when the hotkey is
+        pressed, but can also be called directly by other callers (e.g.
+        a GUI Stop button), sharing the same stop mechanism.
+        """
         if not self._stop_requested:
-            logger.warning("Emergency stop hotkey ('%s') pressed; requesting stop.", emergency_stop_hotkey)
+            logger.warning("Stop requested.")
         self._stop_requested = True
 
     def is_stop_requested(self) -> bool:

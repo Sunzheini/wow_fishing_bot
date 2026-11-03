@@ -237,6 +237,31 @@ def test_capture_screenshot_full_screen_matches_monitor_dimensions(objects):
     assert frame.image.shape[1] == mon["width"]
 
 
+def test_clear_screenshots_removes_all_png_files(objects):
+    """
+    clear_screenshots() must delete every PNG file previously saved by
+    capture_screenshot(), leaving the output directory empty (but intact).
+    """
+    screenshot_capture = objects['screenshot_capture']
+    for screenshot_number in range(3):
+        screenshot_capture.capture_screenshot(screenshot_number)
+
+    assert len(list(screenshot_capture.output_dir.glob("*.png"))) == 3
+
+    screenshot_capture.clear_screenshots()
+
+    assert list(screenshot_capture.output_dir.glob("*.png")) == []
+    assert screenshot_capture.output_dir.exists()  # the directory itself remains
+
+
+def test_clear_screenshots_does_not_raise_when_directory_already_empty(objects):
+    """clear_screenshots() on an already-empty directory must not raise."""
+    screenshot_capture = objects['screenshot_capture']
+    assert list(screenshot_capture.output_dir.glob("*.png")) == []
+
+    screenshot_capture.clear_screenshots()  # should not raise
+
+
 @pytest.fixture(scope="session", autouse=True)
 def screenshot_capture_teardown():
     """
