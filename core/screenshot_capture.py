@@ -1,14 +1,17 @@
 from pathlib import Path
-from time import sleep
+from time import time
 
+import cv2
 import mss.tools
+import numpy as np
 from mss import MSS
 from mss.base import MSSBase
 
+from core.screenshot_frame import ScreenshotFrame
 from support.app_error_handling import InvalidMonitorError, handle_errors
 from support.app_logging import get_logger
-from support.constants import monitor_number_where_the_screenshot_is_taken, period_of_screenshotting, \
-    wait_time_between_screenshots, screenshot_area, screenshots_output_dir_name
+from support.constants import monitor_number_where_the_screenshot_is_taken, \
+    screenshot_area, screenshots_output_dir_name, capture_full_screen
 
 
 logger = get_logger(__name__)
@@ -41,21 +44,23 @@ class ScreenshotCapture:
         return mon
 
     @handle_errors()
-    def capture_screenshots(self) -> None:
-        """
-        Captures `period_of_screenshotting` screenshots of the region
-        defined by `screenshot_area` (support.constants) on the
-        configured monitor, saving each one as a PNG file in
-        `self.output_dir`.
-        """
+    def capture_screenshot(self, screenshot_number: int) -> ScreenshotFrame:
         with MSS() as sct:
             # Get information of the configured monitor (single session,
             # reused for every grab below).
             mon = self.__get_information_of_monitor(sct, monitor_number_where_the_screenshot_is_taken)
 
-            for takt in range(period_of_screenshotting):
-                # Capture a part of the screen, offset from the monitor's
-                # top-left corner by the configured pixel amounts.
+            # Capture either the entire monitor, or a cropped region
+            # offset from the monitor's top-left corner by the
+            # configured pixel amounts, depending on capture_full_screen.
+            if capture_full_screen:
+                region = {
+                    "top": mon["top"],
+                    "left": mon["left"],
+                    "width": mon["width"],
+                    "height": mon["height"],
+                }
+            else:
                 region = {
                     "top": mon["top"] + screenshot_area["pixels_from_top"],
                     "left": mon["left"] + screenshot_area["pixels_from_left"],
@@ -63,18 +68,22 @@ class ScreenshotCapture:
                     "height": screenshot_area["height"],
                 }
 
-                # Include the iteration index so each screenshot gets a unique filename
-                filename = "sct-mon{mon}_{top}x{left}_{width}x{height}_{takt}.png".format(
-                    mon=monitor_number_where_the_screenshot_is_taken, takt=takt, **region
-                )
-                output = self.output_dir / filename
+            # Include the iteration index so each screenshot gets a unique filename
+            filename = "sct-mon{mon}_{top}x{left}_{width}x{height}_{screenshot_number}.png".format(
+                mon=monitor_number_where_the_screenshot_is_taken, screenshot_number=screenshot_number, **region
+            )
+            output = self.output_dir / filename
 
-                # Grab the data
-                sct_img = sct.grab(region)
+            # Grab the data
+            sct_img = sct.grab(region)
 
-                # Save to the picture file
-                mss.tools.to_png(sct_img.rgb, sct_img.size, output=str(output))
-                logger.info("Saved screenshot: %s", output)
+            # Save to the picture file
+            mss.tools.to_png(sct_img.rgb, sct_img.size, output=str(output))
+            logger.info("Saved screenshot: %s", output)
 
-                # Wait before taking the next screenshot
-                sleep(wait_time_between_screenshots)
+            # yield the single screenshot
+            return ScreenshotFrame(
+                image=cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR),
+                timestamp=time(),
+                origin=(region["left"], region["top"])
+            )

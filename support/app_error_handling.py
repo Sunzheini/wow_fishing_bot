@@ -32,6 +32,11 @@ class InvalidMonitorError(AppError):
     pass
 
 
+class TemplateNotFoundError(AppError):
+    """Raised when a required template image can't be loaded from disk."""
+    pass
+
+
 def handle_errors(reraise: bool = True, default_return: T = None) -> Callable:
     """
     Decorator that logs any exception raised inside the wrapped function
