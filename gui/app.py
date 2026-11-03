@@ -13,9 +13,10 @@ from tkinter.scrolledtext import ScrolledText
 
 from core.fishing_bot import FishingBot
 from core.fishing_state import FishingState
+from core.screenshot_capture import ScreenshotCapture
 from support.app_logging import get_logger
 from support.constants import gui_window_title, gui_window_size, gui_poll_interval_ms, \
-    gui_step_color_active, gui_step_color_stopped, gui_step_color_inactive
+    gui_step_color_active, gui_step_color_stopped, gui_step_color_inactive, gui_log_font
 
 logger = get_logger(__name__)
 
@@ -116,11 +117,16 @@ class FishingBotApp:
         self.status_label.pack(anchor="w", pady=(0, 5))
 
         ttk.Label(container, text="Log", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        self.log_text = ScrolledText(container, height=12, state=tk.DISABLED, wrap=tk.WORD)
+        self.log_text = ScrolledText(container, height=12, state=tk.DISABLED, wrap=tk.WORD, font=gui_log_font)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
         self.clear_log_button = ttk.Button(container, text="Clear Log", command=self._on_clear_log_clicked)
         self.clear_log_button.pack(anchor="e", pady=(5, 0))
+
+        self.clear_screenshots_button = ttk.Button(
+            container, text="Clear Screenshots", command=self._on_clear_screenshots_clicked
+        )
+        self.clear_screenshots_button.pack(anchor="e", pady=(5, 0))
 
     def _attach_log_queue_handler(self) -> None:
         import logging
@@ -151,6 +157,14 @@ class FishingBotApp:
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
+
+    def _on_clear_screenshots_clicked(self) -> None:
+        """
+        Manually deletes saved screenshots. This is the ONLY way
+        screenshots ever get deleted -- never automatically -- since
+        they're the main debugging aid for detection failures.
+        """
+        ScreenshotCapture().clear_screenshots()
 
     def _on_close(self) -> None:
         if self.bot is not None:

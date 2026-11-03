@@ -1,6 +1,7 @@
 # Generated at runtime - not part of source
 /logs/
 /screenshots/
+/test_screenshots/
 
 # Python
 __pycache__/

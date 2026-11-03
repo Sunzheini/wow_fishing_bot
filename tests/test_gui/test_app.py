@@ -1,5 +1,6 @@
 import logging
 import tkinter as tk
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -193,6 +194,19 @@ def test_clear_log_does_not_affect_future_log_lines(app):
     app._drain_log_queue()
 
     assert "a brand new line" in app.log_text.get("1.0", tk.END)
+
+
+def test_clear_screenshots_button_calls_clear_screenshots(app, monkeypatch):
+    """
+    Clicking "Clear Screenshots" must call ScreenshotCapture.clear_screenshots(),
+    the only path by which screenshots are ever deleted.
+    """
+    mock_screenshot_capture = MagicMock()
+    monkeypatch.setattr(gui_app_module, "ScreenshotCapture", MagicMock(return_value=mock_screenshot_capture))
+
+    app._on_clear_screenshots_clicked()
+
+    mock_screenshot_capture.clear_screenshots.assert_called_once()
 
 
 # ----- Start/Stop button behavior -------------------------------------------

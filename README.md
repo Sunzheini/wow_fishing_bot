@@ -67,13 +67,12 @@ press **Stop**, close the GUI window, or press the emergency-stop hotkey
   `request_stop()` mechanism, which is checked at the top of every loop
   iteration — the bot halts within at most one iteration (at most ~0.2s if
   it's mid-splash-watch).
-- On shutdown, the bot:
-  - unregisters the global emergency-stop hotkey, and
-  - **deletes every screenshot saved during the run** (`core/screenshot_capture.py`'s
-    `clear_screenshots()`). Screenshots are only ever useful as a transient
-    debugging aid while the bot is actively running (there can be hundreds
-    of them, captured every 0.2s while watching for a splash) — they are not
-    meant to persist on disk afterward.
+- On shutdown, the bot unregisters the global emergency-stop hotkey. Saved
+  screenshots are **never deleted automatically** — they're the primary
+  debugging aid for figuring out why detection failed, and auto-deleting them
+  (whether on every stop, or only on certain kinds of stop) repeatedly got in
+  the way of exactly that. Use the GUI's **"Clear Screenshots"** button when
+  you want to free the disk space yourself.
 
 ### Safety nets
 
@@ -93,6 +92,8 @@ Run `python run_gui.py` (or the packaged `.exe`) to open the frontend:
 - A live, auto-scrolling log panel fed by the same centralized logger used
   everywhere else in the app (`support/app_logging.py`), so you see exactly
   what the bot is doing in real time.
+- **Clear Log** / **Clear Screenshots** buttons — manual cleanup only; nothing
+  is ever deleted automatically.
 
 ## Multi-monitor setups
 

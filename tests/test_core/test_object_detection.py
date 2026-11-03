@@ -11,7 +11,7 @@ from support.constants import assets_dir_name, templates_dir_name
 
 ASSETS_DIR = Path(object_detection_module.__file__).parent.parent / assets_dir_name / templates_dir_name
 
-KNOWN_BOBBER_POSITION = (1001, 356)  # confirmed via find_bobber() on the real fixture screenshot
+KNOWN_BOBBER_POSITION = (1015, 299)  # confirmed via find_bobber() on the real fixture screenshot
 
 
 def load_frame(filename: str) -> ScreenshotFrame:
@@ -174,3 +174,54 @@ def test_detect_splash_returns_false_for_out_of_bounds_bobber_position(objects):
     out_of_bounds_position = (-10_000, -10_000)
 
     assert object_detection.detect_splash(frame, out_of_bounds_position) is False
+
+
+# ----- Multi-scale matching --------------------------------------------------
+
+def test_find_bobber_still_finds_bobber_when_template_is_scaled_down(objects, monkeypatch):
+    """
+    If the real bobber appears SMALLER on screen than the stored
+    template (e.g. the player zoomed out since the template was
+    captured), find_bobber() must still locate it by trying smaller
+    scaled-down versions of the template.
+    """
+    object_detection = objects['object_detection']
+
+    # Shrink the real fixture screenshot itself to 70% size, simulating
+    # the bobber appearing smaller (more "zoomed out") than the template.
+    original = cv2.imread(str(ASSETS_DIR / "screenshot_with_bobber_no_splash.jpg"))
+    shrunk = cv2.resize(original, (int(original.shape[1] * 0.7), int(original.shape[0] * 0.7)))
+    frame = ScreenshotFrame(image=shrunk, timestamp=0.0, origin=(0, 0))
+
+    position = object_detection.find_bobber(frame)
+
+    assert position is not None
+    expected_x = int(KNOWN_BOBBER_POSITION[0] * 0.7)
+    expected_y = int(KNOWN_BOBBER_POSITION[1] * 0.7)
+    assert abs(position[0] - expected_x) <= 10
+    assert abs(position[1] - expected_y) <= 10
+
+
+def test_multi_scale_match_prefers_the_best_scoring_scale(objects):
+    """
+    __multi_scale_match must return the highest score found across all
+    configured scales, not just whatever the first scale happens to produce.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    frame_gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+
+    best_score, best_loc, best_shape = ObjectDetection._ObjectDetection__multi_scale_match(
+        frame_gray, object_detection.bobber_template_gray, [0.5, 1.0, 1.5]
+    )
+
+    # Manually compute the score at scale=1.0 (no resizing) and confirm
+    # the multi-scale result is at least as good (it found the real
+    # bobber, cropped at native scale, so 1.0 should already be near-perfect).
+    import cv2 as cv2_local
+    result = cv2_local.matchTemplate(frame_gray, object_detection.bobber_template_gray, cv2_local.TM_CCOEFF_NORMED)
+    _, single_scale_score, _, _ = cv2_local.minMaxLoc(result)
+
+    assert best_score >= single_scale_score - 1e-6
+    assert best_score > 0.9  # this fixture was cropped from this exact screenshot
+

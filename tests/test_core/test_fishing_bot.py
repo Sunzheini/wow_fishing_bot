@@ -176,15 +176,23 @@ def test_request_stop_delegates_to_emergency_stop(mocks):
     mocks["emergency_stop"].request_stop.assert_called_once()
 
 
-def test_shutdown_delegates_to_emergency_stop_and_clears_screenshots(mocks):
+def test_shutdown_releases_hotkey_and_never_touches_screenshots(mocks):
     """
-    FishingBot.shutdown() must release the hotkey hook AND clear saved
-    screenshots, since they're only a debugging aid during a run.
+    FishingBot.shutdown() must release the hotkey hook but NEVER delete
+    screenshots automatically, regardless of why the bot stopped --
+    screenshots are a debugging aid that should only ever be cleared by
+    an explicit user action (e.g. the GUI's "Clear Screenshots" button).
     """
-    bot = FishingBot()
-    bot.shutdown()
-    mocks["emergency_stop"].stop_listening.assert_called_once()
-    mocks["screenshot_capture"].clear_screenshots.assert_called_once()
+    for stop_requested in (True, False):
+        mocks["emergency_stop"].is_stop_requested.return_value = stop_requested
+        mocks["emergency_stop"].reset_mock()
+        mocks["screenshot_capture"].reset_mock()
+
+        bot = FishingBot()
+        bot.shutdown()
+
+        mocks["emergency_stop"].stop_listening.assert_called_once()
+        mocks["screenshot_capture"].clear_screenshots.assert_not_called()
 
 
 def test_run_raises_if_state_handling_fails(mocks):

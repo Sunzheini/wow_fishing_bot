@@ -8,7 +8,8 @@ from core.screenshot_frame import ScreenshotFrame
 from support.app_error_handling import TemplateNotFoundError, handle_errors
 from support.app_logging import get_logger
 from support.constants import assets_dir_name, templates_dir_name, bobber_template_file_name, \
-    bobber_match_threshold, splash_template_file_name, splash_match_threshold, splash_search_radius
+    bobber_match_threshold, bobber_match_scales, splash_template_file_name, splash_match_threshold, \
+    splash_search_radius, splash_match_scales
 
 logger = get_logger(__name__)
 
@@ -56,12 +57,49 @@ class ObjectDetection:
 
         return template
 
+    @staticmethod
+    def __multi_scale_match(search_image_gray: np.ndarray, template_gray: np.ndarray,
+                             scales: list[float]) -> tuple[float, tuple[int, int], tuple[int, int]]:
+        """
+        Runs cv2.matchTemplate at several scaled versions of
+        `template_gray` against `search_image_gray`, returning the best
+        (score, top_left_location, (template_height, template_width))
+        found across all scales. This makes matching robust to the
+        template having been captured at a different camera zoom level
+        than the current one.
+        """
+        best_score = -1.0
+        best_loc = (0, 0)
+        best_shape = template_gray.shape[:2]
+
+        search_height, search_width = search_image_gray.shape[:2]
+        original_height, original_width = template_gray.shape[:2]
+
+        for scale in scales:
+            scaled_height = max(1, int(original_height * scale))
+            scaled_width = max(1, int(original_width * scale))
+            if scaled_height >= search_height or scaled_width >= search_width:
+                continue
+
+            resized_template = cv2.resize(template_gray, (scaled_width, scaled_height))
+            result = cv2.matchTemplate(search_image_gray, resized_template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+            if max_val > best_score:
+                best_score = max_val
+                best_loc = max_loc
+                best_shape = (scaled_height, scaled_width)
+
+        return best_score, best_loc, best_shape
+
     @handle_errors()
     def find_bobber(self, frame: ScreenshotFrame) -> Optional[tuple[int, int]]:
         """
-        Locates the bobber inside `frame` via template matching.
-        Returns the bobber's (x, y) position in absolute screen
-        coordinates, or None if no sufficiently confident match is found.
+        Locates the bobber inside `frame` via multi-scale template
+        matching (robust to camera zoom differences between when
+        bobber.jpg was captured and the current session). Returns the
+        bobber's (x, y) position in absolute screen coordinates, or None
+        if no sufficiently confident match is found at any scale.
         """
         if self.bobber_template_gray is None:
             return None
@@ -73,27 +111,31 @@ class ObjectDetection:
             logger.warning("Frame is smaller than the bobber template; skipping match.")
             return None
 
-        result = cv2.matchTemplate(frame_gray, self.bobber_template_gray, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        max_val, max_loc, (matched_height, matched_width) = self.__multi_scale_match(
+            frame_gray, self.bobber_template_gray, bobber_match_scales
+        )
 
-        if max_val < bobber_match_threshold:
-            logger.debug("Bobber not found (best match score %.3f < %.3f)", max_val, bobber_match_threshold)
-            return None
-
-        local_x = max_loc[0] + template_width // 2
-        local_y = max_loc[1] + template_height // 2
-
+        local_x = max_loc[0] + matched_width // 2
+        local_y = max_loc[1] + matched_height // 2
         screen_x = frame.origin[0] + local_x
         screen_y = frame.origin[1] + local_y
 
-        logger.debug("Bobber found at screen (%d, %d), score %.3f", screen_x, screen_y, max_val)
+        if max_val < bobber_match_threshold:
+            logger.info(
+                "Bobber NOT found: best score %.3f < threshold %.3f (best guess was at screen (%d, %d))",
+                max_val, bobber_match_threshold, screen_x, screen_y
+            )
+            return None
+
+        logger.info("Bobber found at screen (%d, %d), score %.3f (threshold %.3f)",
+                    screen_x, screen_y, max_val, bobber_match_threshold)
         return screen_x, screen_y
 
     @handle_errors()
     def detect_splash(self, frame: ScreenshotFrame, bobber_position: tuple[int, int]) -> bool:
         """
-        Detects a splash via template matching, restricted to a small
-        search window (radius `splash_search_radius`) around
+        Detects a splash via multi-scale template matching, restricted
+        to a small search window (radius `splash_search_radius`) around
         `bobber_position` (absolute screen coordinates). This is both
         faster and more reliable than a full-frame search, since the
         splash always occurs near the bobber.
@@ -110,11 +152,11 @@ class ObjectDetection:
             logger.warning("Splash search window is smaller than the splash template; skipping match.")
             return False
 
-        result = cv2.matchTemplate(window_gray, self.splash_template_gray, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, _ = cv2.minMaxLoc(result)
+        max_val, _, _ = self.__multi_scale_match(window_gray, self.splash_template_gray, splash_match_scales)
 
         is_splash = max_val >= splash_match_threshold
-        logger.debug("Splash check near %s: score=%.3f -> %s", bobber_position, max_val, is_splash)
+        logger.info("Splash check near %s: score=%.3f, threshold=%.3f -> %s",
+                    bobber_position, max_val, splash_match_threshold, "SPLASH" if is_splash else "no splash")
         return is_splash
 
     @staticmethod

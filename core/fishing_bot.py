@@ -44,12 +44,15 @@ class FishingBot:
 
     def shutdown(self) -> None:
         """
-        Releases OS-level resources (the emergency-stop hotkey hook) and
-        clears saved screenshots, since they're only useful as a
-        debugging aid during a run.
+        Releases OS-level resources (the emergency-stop hotkey hook).
+
+        Does NOT delete saved screenshots -- they're a debugging aid and
+        should only ever be cleared by an explicit user action (e.g. the
+        GUI's "Clear Screenshots" button), never automatically. Deleting
+        them based on *why* the bot stopped was tried and repeatedly
+        got in the way of debugging real detection failures.
         """
         self.emergency_stop.stop_listening()
-        self.screenshot_capture.clear_screenshots()
 
     def __wait_before_starting(self) -> bool:
         """
@@ -117,6 +120,8 @@ class FishingBot:
                     screenshot_frame = screenshot_capture.capture_screenshot(screenshot_number)
                     screenshot_number += 1
                     bobber_search_attempts += 1
+                    logger.info("Looking for bobber: attempt %d/%d", bobber_search_attempts,
+                                max_bobber_search_attempts)
 
                     bobber_position = object_detection.find_bobber(screenshot_frame)
 
@@ -135,6 +140,8 @@ class FishingBot:
                     screenshot_frame = screenshot_capture.capture_screenshot(screenshot_number)
                     screenshot_number += 1
                     splash_watch_attempts += 1
+                    logger.info("Watching for splash: attempt %d/%d", splash_watch_attempts,
+                                max_splash_watch_attempts)
 
                     splash_detected = object_detection.detect_splash(screenshot_frame, bobber_position)
 
