@@ -29,6 +29,9 @@ log_backup_count = 5  # keep up to 5 rotated log files
 max_state_machine_iterations = 100  # safety cap to avoid infinite loops
 max_splash_watch_attempts = 25  # how many WATCHING_FOR_SPLASH attempts before giving up
 cast_animation_wait_seconds = 1.5  # time to wait for the cast animation to finish before looking for the bobber
+max_bobber_search_attempts = 10  # how many WAITING_FOR_BOBBER attempts before giving up
+bobber_search_retry_delay_seconds = 0.5  # delay between WAITING_FOR_BOBBER retries
+emergency_stop_hotkey = "esc"  # global hotkey that immediately stops the bot
 #endregion
 
 #region Object Detection Constants

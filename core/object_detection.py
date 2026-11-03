@@ -50,6 +50,8 @@ class ObjectDetection:
 
         template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
         if template is None:
+            logger.error("Failed to load template image at %s (file exists but could not be decoded)",
+                         template_path)
             raise TemplateNotFoundError(f"Failed to load template image at {template_path}")
 
         return template
