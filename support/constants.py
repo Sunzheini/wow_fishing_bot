@@ -129,15 +129,23 @@ bobber_color_fallback_search_radius = 100  # pixels around the template's best g
 # was exactly 0.0 on every non-splash frame, and 0.004-0.009 on every
 # confirmed real splash frame.
 splash_region_radius = 40  # pixels around the bobber to inspect for a splash
-splash_brightness_threshold = 200  # grayscale value (0-255) considered "bright" (splash foam/water)
-# Confirmed via a real missed splash (user visually confirmed a splash
-# at bright_ratio=0.0016, just under the old 0.002 threshold -- likely
-# a weaker/smaller-looking splash due to a different camera zoom than
-# the original calibration session). Across an entire real session
-# (hundreds of non-splash checks), the baseline noise ratio was exactly
-# 0.0000 every single time, so there's a wide safety margin to lower
-# this threshold without risking false positives.
-splash_pixel_ratio_threshold = 0.001  # fraction of bright pixels in the region needed to count as a splash
+# Confirmed via 4 real missed splashes (user visually confirmed real
+# splashes across 3 different timed-out casts) that scored only
+# 0.0003-0.0016 at brightness_threshold=200 -- apparently not an
+# occasional fluke but a common occurrence (roughly 1/3 of real splashes
+# in that session). Direct pixel analysis of those exact frames showed
+# their foam pixels peaked around grayscale 225-255 but most of the
+# foam area was only in the 150-200 range, i.e. not pure/saturated
+# white -- too dim to count under the old threshold. At
+# brightness_threshold=150, those same 4 frames scored 0.0063-0.0131 (a
+# clean, strong signal), while confirmed non-splash baseline frames
+# from the very same casts still scored exactly 0.0000 (max pixel value
+# stayed at 94-132, safely below 150) -- so lowering the brightness
+# threshold is well-supported and doesn't risk false positives.
+splash_brightness_threshold = 150  # grayscale value (0-255) considered "bright" (splash foam/water)
+# Set well above the confirmed 0.0000 baseline noise floor and safely
+# below the weakest observed real splash (0.0063) for a wide margin.
+splash_pixel_ratio_threshold = 0.003  # fraction of bright pixels in the region needed to count as a splash
 #endregion
 
 #region Controls Interaction Constants
@@ -169,6 +177,13 @@ reel_click_spray_offsets = [
     (0, 0), (0, -4), (0, 4), (-4, 0), (4, 0),
 ]
 reel_click_spray_delay = 0.05  # pause between consecutive spray click attempts
+# After looting, park the mouse cursor out of the way so it doesn't
+# linger over the water -- an idle cursor can show a tooltip/highlight
+# over nearby objects, and keeping it away from the capture area avoids
+# any chance of it visually interfering with the next screenshot's
+# bobber/splash detection.
+park_mouse_after_reel = True
+park_mouse_position = (0, 0)  # absolute screen coordinates (top-left corner)
 wow_window_title_substring = "World of Warcraft"  # used to find & focus the game window before sending input
 #endregion
 

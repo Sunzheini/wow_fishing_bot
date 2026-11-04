@@ -5,7 +5,8 @@ import pytest
 import core.controls_interaction as controls_interaction_module
 from support.constants import fishing_keybind, key_press_duration, mouse_move_duration, \
     reel_click_button, reel_click_modifier_key, reel_modifier_press_delay, reel_click_hold_duration, \
-    reel_modifier_release_delay, reel_click_spray_offsets, reel_click_spray_delay, wow_window_title_substring
+    reel_modifier_release_delay, reel_click_spray_offsets, reel_click_spray_delay, park_mouse_position, \
+    wow_window_title_substring
 
 
 @pytest.fixture(autouse=True)
@@ -69,10 +70,11 @@ def test_reel_in_bobber_sprays_clicks_around_the_detected_position(objects, mock
 
     controls_interaction.reel_in_bobber(position)
 
-    expected_move_calls = [
+    expected_spray_moves = [
         call(123 + dx, 456 + dy, duration=mouse_move_duration) for dx, dy in reel_click_spray_offsets
     ]
-    assert mock_pydirectinput.moveTo.call_args_list == expected_move_calls
+    # moveTo is also called once more at the end to park the mouse.
+    assert mock_pydirectinput.moveTo.call_args_list[:-1] == expected_spray_moves
 
     mock_pydirectinput.keyDown.assert_called_once_with(reel_click_modifier_key)
     assert mock_pydirectinput.mouseDown.call_count == len(reel_click_spray_offsets)
@@ -81,16 +83,48 @@ def test_reel_in_bobber_sprays_clicks_around_the_detected_position(objects, mock
     mock_pydirectinput.mouseUp.assert_called_with(button=reel_click_button)
     mock_pydirectinput.keyUp.assert_called_once_with(reel_click_modifier_key)
 
-    # keyDown(shift) happens before the first click, keyUp(shift) is the very last call overall.
+    # keyDown(shift) happens before the first click, keyUp(shift) happens
+    # before the final park-mouse moveTo.
     mock_calls = mock_pydirectinput.mock_calls
     assert mock_calls.index(call.keyDown(reel_click_modifier_key)) < \
            mock_calls.index(call.mouseDown(button=reel_click_button))
-    assert mock_calls[-1] == call.keyUp(reel_click_modifier_key)
+    assert mock_calls.index(call.keyUp(reel_click_modifier_key)) < mock_calls.index(mock_calls[-1])
 
     mock_sleep.assert_any_call(reel_modifier_press_delay)
     mock_sleep.assert_any_call(reel_click_hold_duration)
     mock_sleep.assert_any_call(reel_modifier_release_delay)
     mock_sleep.assert_any_call(reel_click_spray_delay)
+
+
+def test_reel_in_bobber_parks_mouse_after_looting(objects, mock_pydirectinput):
+    """
+    After successfully looting, reel_in_bobber() must move the mouse to
+    the configured park position (out of the way of the water/capture
+    area), as the very last action.
+    """
+    controls_interaction = objects['controls_interaction']
+
+    controls_interaction.reel_in_bobber((123, 456))
+
+    park_x, park_y = park_mouse_position
+    mock_pydirectinput.moveTo.assert_called_with(park_x, park_y, duration=mouse_move_duration)
+    assert mock_pydirectinput.mock_calls[-1] == call.moveTo(park_x, park_y, duration=mouse_move_duration)
+
+
+def test_reel_in_bobber_does_not_park_mouse_if_click_fails(objects, mock_pydirectinput):
+    """
+    If the click sequence fails partway through, the mouse must not be
+    parked afterward (the exception propagates before reaching that step).
+    """
+    controls_interaction = objects['controls_interaction']
+    mock_pydirectinput.mouseDown.side_effect = RuntimeError("simulated click failure")
+
+    with pytest.raises(RuntimeError):
+        controls_interaction.reel_in_bobber((10, 20))
+
+    park_x, park_y = park_mouse_position
+    for call_args in mock_pydirectinput.moveTo.call_args_list:
+        assert call_args != call(park_x, park_y, duration=mouse_move_duration)
 
 
 def test_reel_in_bobber_releases_modifier_key_even_if_click_fails(objects, mock_pydirectinput):

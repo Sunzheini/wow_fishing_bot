@@ -6,7 +6,8 @@ from support.app_error_handling import handle_errors
 from support.app_logging import get_logger
 from support.constants import fishing_keybind, key_press_duration, mouse_move_duration, reel_click_button, \
     reel_click_modifier_key, reel_modifier_press_delay, reel_click_hold_duration, reel_modifier_release_delay, \
-    reel_click_spray_offsets, reel_click_spray_delay, wow_window_title_substring
+    reel_click_spray_offsets, reel_click_spray_delay, park_mouse_after_reel, park_mouse_position, \
+    wow_window_title_substring
 from support.window_utils import focus_window_by_title_substring
 
 logger = get_logger(__name__)
@@ -56,6 +57,11 @@ class ControlsInteraction:
         after each click (instead of an instant click()) because some
         games poll modifier key state and can otherwise miss a
         just-pressed Shift.
+
+        After looting, the mouse is parked out of the way (see
+        `park_mouse_after_reel` / `park_mouse_position`) so the cursor
+        doesn't linger over the water, keeping it clear of the capture
+        area for the next screenshot.
         """
         focus_window_by_title_substring(wow_window_title_substring)
         x, y = bobber_position
@@ -77,3 +83,9 @@ class ControlsInteraction:
                     time.sleep(reel_click_spray_delay)
         finally:
             pydirectinput.keyUp(reel_click_modifier_key)
+
+        if park_mouse_after_reel:
+            park_x, park_y = park_mouse_position
+            logger.debug("Parking mouse at (%d, %d) after looting.", park_x, park_y)
+            pydirectinput.moveTo(park_x, park_y, duration=mouse_move_duration)
+
