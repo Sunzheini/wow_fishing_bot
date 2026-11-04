@@ -26,13 +26,13 @@ def load_frame(filename: str) -> ScreenshotFrame:
 
 def test_templates_are_loaded_on_init(objects):
     """
-    Both the bobber and splash templates must load successfully from the
-    real asset files, since they're present in assets/templates/.
+    The bobber template must load successfully from the real asset
+    file, since it's present in assets/templates/. (Splash detection no
+    longer uses a template -- see detect_splash tests below.)
     """
     object_detection = objects['object_detection']
 
     assert object_detection.bobber_template_gray is not None
-    assert object_detection.splash_template_gray is not None
 
 
 def test_load_template_gray_returns_none_for_missing_file():
@@ -155,22 +155,11 @@ def test_detect_splash_true_when_splash_present(objects):
     assert object_detection.detect_splash(frame, SPLASH_BOBBER_POSITION) is True
 
 
-def test_detect_splash_returns_false_when_template_missing(objects, monkeypatch):
+def test_detect_splash_returns_false_when_region_out_of_frame(objects):
     """
-    If the splash template failed to load (None), detect_splash() must
-    return False instead of raising.
-    """
-    object_detection = objects['object_detection']
-    monkeypatch.setattr(object_detection, "splash_template_gray", None)
-
-    frame = load_frame("screenshot_with_bobber_with_splash.jpg")
-    assert object_detection.detect_splash(frame, KNOWN_BOBBER_POSITION) is False
-
-
-def test_detect_splash_returns_false_for_out_of_bounds_bobber_position(objects):
-    """
-    A bobber_position far outside the frame bounds must be handled
-    gracefully (no crash), returning False.
+    If the splash region computed around bobber_position doesn't
+    overlap the frame at all, detect_splash() must return False
+    instead of raising.
     """
     object_detection = objects['object_detection']
     frame = load_frame("screenshot_with_bobber_with_splash.jpg")

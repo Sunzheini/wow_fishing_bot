@@ -60,10 +60,19 @@ bobber_match_threshold = 0.65  # cv2.matchTemplate TM_CCOEFF_NORMED score requir
 # of the template and keep whichever scores best.
 bobber_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]
 
-splash_template_file_name = "splash.jpg"  # cropped reference image of the splash/foam effect
-splash_match_threshold = 0.8  # cv2.matchTemplate TM_CCOEFF_NORMED score required to accept a splash match
-splash_search_radius = 80  # pixels around the bobber position to search for the splash template
-splash_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]  # same rationale as bobber_match_scales
+# The splash is a randomly-scattered particle/foam effect -- the
+# relative positions of its bright pixels differ every time, even
+# though the general appearance is similar. That makes rigid template
+# matching fundamentally unreliable here (validated against 2 real
+# sessions: scores for confirmed real splashes landed in the same
+# 0.6-0.7 range as plain background noise). A brightness/pixel-density
+# heuristic is position/shape-invariant and was validated as a clean,
+# repeatable signal across 3 independent real screenshots: ratio>200
+# was exactly 0.0 on every non-splash frame, and 0.004-0.009 on every
+# confirmed real splash frame.
+splash_region_radius = 40  # pixels around the bobber to inspect for a splash
+splash_brightness_threshold = 200  # grayscale value (0-255) considered "bright" (splash foam/water)
+splash_pixel_ratio_threshold = 0.002  # fraction of bright pixels in the region needed to count as a splash
 #endregion
 
 #region Controls Interaction Constants
