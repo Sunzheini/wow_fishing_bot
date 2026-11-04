@@ -27,10 +27,15 @@ log_backup_count = 5  # keep up to 5 rotated log files
 #region Fishing State Machine Constants
 max_state_machine_iterations = 100_000  # safety cap to avoid a truly infinite loop
 start_delay_seconds = 10  # countdown after Start is pressed, before the first cast (time to alt-tab into WoW)
-# At wait_time_between_screenshots=0.2s, 150 attempts is ~30s of watching for a
-# bite before giving up on this cast and recasting (WoW Forever's max bite
-# wait time is ~30s).
-max_splash_watch_attempts = 150
+# Counting a fixed number of attempts (at the nominal
+# wait_time_between_screenshots cadence) to approximate a time budget
+# was confirmed unreliable in practice: real screenshot capture +
+# detection overhead pushes the actual per-attempt cadence well above
+# the nominal sleep (observed ~0.5s/attempt instead of 0.2s), making a
+# 150-attempt budget take ~75s instead of the intended ~30s. Track
+# real wall-clock elapsed time instead (WoW Forever's max bite wait
+# time is ~30s).
+splash_watch_timeout_seconds = 30
 cast_animation_wait_seconds = 1.5  # time to wait for the cast animation to finish before looking for the bobber
 max_bobber_search_attempts = 10  # how many WAITING_FOR_BOBBER attempts before giving up entirely
 bobber_search_retry_delay_seconds = 0.5  # delay between WAITING_FOR_BOBBER retries
@@ -69,8 +74,13 @@ bobber_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]
 # central bounding box (instead of just excluding top/bottom strips)
 # is far more robust: it was the only way to reliably eliminate
 # false-positive matches that kept appearing near screen corners/edges.
-bobber_search_region_x_fraction = (3 / 9, 7 / 9)  # (left, right) as a fraction of frame width
-bobber_search_region_y_fraction = (1 / 9, 6 / 9)  # (top, bottom) as a fraction of frame height
+bobber_search_region_x_fraction = (2 / 9, 7 / 9)  # (left, right) as a fraction of frame width
+# Tightened further after confirming part of the beach (a static
+# terrain patch, not water) was included around rows 500-600 of a
+# 1080p frame -- this acted as a persistent low-confidence distractor
+# whenever the real bobber was hard to match. Bottom bound lowered from
+# 6/9 (720px) to 500px so rows 500+ are excluded entirely.
+bobber_search_region_y_fraction = (1 / 9, 500 / 1080)  # (top, bottom) as a fraction of frame height
 
 # The bobber's two feathers have distinctive, saturated blue and red
 # colors that plain water never has -- template matching alone works on
@@ -120,7 +130,14 @@ bobber_color_fallback_search_radius = 100  # pixels around the template's best g
 # confirmed real splash frame.
 splash_region_radius = 40  # pixels around the bobber to inspect for a splash
 splash_brightness_threshold = 200  # grayscale value (0-255) considered "bright" (splash foam/water)
-splash_pixel_ratio_threshold = 0.002  # fraction of bright pixels in the region needed to count as a splash
+# Confirmed via a real missed splash (user visually confirmed a splash
+# at bright_ratio=0.0016, just under the old 0.002 threshold -- likely
+# a weaker/smaller-looking splash due to a different camera zoom than
+# the original calibration session). Across an entire real session
+# (hundreds of non-splash checks), the baseline noise ratio was exactly
+# 0.0000 every single time, so there's a wide safety margin to lower
+# this threshold without risking false positives.
+splash_pixel_ratio_threshold = 0.001  # fraction of bright pixels in the region needed to count as a splash
 #endregion
 
 #region Controls Interaction Constants

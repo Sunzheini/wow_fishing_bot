@@ -179,15 +179,22 @@ def test_accepts_bobber_candidate_once_motion_confirms_real_water(mocks):
     mocks["controls_interaction"].reel_in_bobber.assert_called_once_with(bobber_position)
 
 
-def test_recasts_after_max_splash_watch_attempts_when_splash_never_detected(mocks, monkeypatch):
+def test_recasts_after_splash_watch_timeout_when_splash_never_detected(mocks, monkeypatch):
     """
     If detect_splash() always returns False, the state machine must give
-    up watching after max_splash_watch_attempts attempts and recast
-    (go back to IDLE -> CASTING) rather than stopping entirely.
+    up watching once splash_watch_timeout_seconds of wall-clock time has
+    elapsed (not a fixed attempt count, since real capture/detection
+    overhead makes attempt-counting an unreliable proxy for actual
+    elapsed time) and recast (go back to IDLE -> CASTING) rather than
+    stopping entirely.
     """
-    monkeypatch.setattr(fishing_bot_module, "max_splash_watch_attempts", 4)
     mocks["object_detection"].find_bobber.return_value = (1, 2)
     mocks["object_detection"].detect_splash.return_value = False
+
+    # Simulate monotonic() advancing: start=0, then elapsed 5/10/20/35s
+    # across 4 WATCHING_FOR_SPLASH iterations -- the 4th exceeds the
+    # (real, unmocked) 30s timeout, ending the watch.
+    monkeypatch.setattr(fishing_bot_module, "monotonic", MagicMock(side_effect=[0, 5, 10, 20, 35]))
 
     # 8 iterations for one full "no bite" cycle + the start of a recast:
     # IDLE, CASTING, WAITING_FOR_BOBBER, WATCHING_FOR_SPLASH x4 (gives up,

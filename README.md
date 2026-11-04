@@ -38,17 +38,20 @@ IDLE → CASTING → WAITING_FOR_BOBBER → WATCHING_FOR_SPLASH → REELING → 
 2. **CASTING** — waits `cast_animation_wait_seconds` (default 1.5s) for the
    cast animation to finish and the bobber to land on the water.
 3. **WAITING_FOR_BOBBER** — takes a screenshot and runs template matching
-   (`bobber.jpg`) to find the bobber. Retries up to `max_bobber_search_attempts`
-   times (with a short delay between attempts) before giving up **entirely**
-   if the bobber can never be found (this usually means something is visually
-   wrong — wrong screen region, no water in view, etc. — so the whole bot
-   stops rather than looping forever).
+   (`bobber.jpg`) to find the bobber, with a color-blob fallback (looking for
+   the bobber's distinctive blue/red feathers) if the template match is too
+   weak. Retries up to `max_bobber_search_attempts` times (with a short delay
+   between attempts) before giving up on this cast and **recasting** (this can
+   happen normally — missed cast, bobber briefly obscured, etc.).
 4. **WATCHING_FOR_SPLASH** — once the bobber's position is known, this is the
-   background polling loop: a screenshot is taken and analyzed for the splash
-   template (`splash.jpg`) near the bobber **every `wait_time_between_screenshots`
-   seconds (0.2s by default)**. This repeats for up to `max_splash_watch_attempts`
-   (default 150 → ~30 seconds of watching, matching WoW Forever's maximum
-   bite wait time).
+   background polling loop: a screenshot is taken and analyzed for a splash
+   (a brightness/pixel-density heuristic near the bobber) **every
+   `wait_time_between_screenshots` seconds (0.2s by default)**. This repeats
+   until **`splash_watch_timeout_seconds` (default 30) of real wall-clock time**
+   has elapsed, matching WoW Forever's maximum bite wait time (a fixed attempt
+   count was tried first but proved unreliable, since real screenshot capture
+   overhead pushes the actual per-attempt cadence well above the nominal
+   sleep interval).
    - **Splash detected** → go to REELING.
    - **No splash within the watch window** → this is normal (the fish just
      hasn't bitten yet), so the bot **recasts**: it goes back to IDLE and

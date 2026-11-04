@@ -1,4 +1,4 @@
-from time import sleep
+from time import monotonic, sleep
 from typing import Callable, Optional
 
 from core.controls_interaction import ControlsInteraction
@@ -8,9 +8,9 @@ from core.object_detection import ObjectDetection
 from core.ocr_recognition import OcrRecognition
 from core.screenshot_capture import ScreenshotCapture
 from support.app_logging import get_logger
-from support.constants import max_state_machine_iterations, max_splash_watch_attempts, cast_animation_wait_seconds, \
-    max_bobber_search_attempts, bobber_search_retry_delay_seconds, wait_time_between_screenshots, \
-    start_delay_seconds, bobber_motion_check_delay_seconds
+from support.constants import max_state_machine_iterations, splash_watch_timeout_seconds, \
+    cast_animation_wait_seconds, max_bobber_search_attempts, bobber_search_retry_delay_seconds, \
+    wait_time_between_screenshots, start_delay_seconds, bobber_motion_check_delay_seconds
 
 logger = get_logger(__name__)
 
@@ -85,6 +85,7 @@ class FishingBot:
         state = FishingState.IDLE
         screenshot_number = 0
         splash_watch_attempts = 0
+        splash_watch_start_time = 0.0
         bobber_search_attempts = 0
         iterations = 0
         bobber_position: tuple[int, int] | None = None
@@ -108,6 +109,7 @@ class FishingBot:
                 if state == FishingState.IDLE:
                     controls_interaction.cast_fishing_line()
                     splash_watch_attempts = 0
+                    splash_watch_start_time = 0.0
                     bobber_search_attempts = 0
                     bobber_position = None
                     state = FishingState.CASTING
@@ -162,24 +164,26 @@ class FishingBot:
 
                 elif state == FishingState.WATCHING_FOR_SPLASH:
                     assert bobber_position is not None  # guaranteed by WAITING_FOR_BOBBER
+                    if splash_watch_attempts == 0:
+                        splash_watch_start_time = monotonic()
+
                     screenshot_frame = screenshot_capture.capture_screenshot(screenshot_number)
                     screenshot_number += 1
                     splash_watch_attempts += 1
-                    logger.info("Watching for splash: attempt %d/%d", splash_watch_attempts,
-                                max_splash_watch_attempts)
+                    elapsed_seconds = monotonic() - splash_watch_start_time
+                    logger.info("Watching for splash: attempt %d (%.1fs/%ds elapsed)", splash_watch_attempts,
+                                elapsed_seconds, splash_watch_timeout_seconds)
 
                     splash_detected = object_detection.detect_splash(screenshot_frame, bobber_position)
 
                     if splash_detected:
                         state = FishingState.REELING
-                    elif splash_watch_attempts >= max_splash_watch_attempts:
+                    elif elapsed_seconds >= splash_watch_timeout_seconds:
                         # No bite within the watch window -- this is normal
                         # (WoW bites can take a while), so recast rather
                         # than stopping the whole bot.
                         state = FishingState.IDLE
-                        logger.info("No splash detected within %d attempts (~%.1fs); recasting.",
-                                    max_splash_watch_attempts,
-                                    max_splash_watch_attempts * wait_time_between_screenshots)
+                        logger.info("No splash detected within %ds; recasting.", splash_watch_timeout_seconds)
                     else:
                         # Keep watching, pacing captures at wait_time_between_screenshots.
                         sleep(wait_time_between_screenshots)
