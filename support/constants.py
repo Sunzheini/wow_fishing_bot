@@ -81,6 +81,27 @@ key_press_duration = 0.05  # seconds to hold the fishing key down
 mouse_move_duration = 0.1  # seconds for the mouse to travel to the bobber position
 reel_click_button = "right"  # mouse button used to interact with / reel in the bobber
 reel_click_modifier_key = "shift"  # held during the reel click to trigger WoW's auto-loot
+# pydirectinput's click() performs mouseDown+mouseUp almost instantly. Some
+# games (including WoW) poll modifier key state and can miss a modifier
+# that wasn't held for at least a few ms before/during the click, so the
+# right-click registers but Shift isn't seen -> reels in without looting.
+# These delays ensure Shift is clearly down before the click starts and
+# still down for a moment after it ends.
+reel_modifier_press_delay = 0.15  # held after keyDown(shift), before the mouse click starts
+reel_click_hold_duration = 0.08  # how long the mouse button itself stays down
+reel_modifier_release_delay = 0.15  # held after the click ends, before keyUp(shift)
+# WoW's clickable hitbox for the fishing bobber is notoriously tiny (a
+# few pixels), while the detected position is only the center of the
+# visual template match, which can be slightly offset from the real
+# interactable point. Instead of a single click, try several nearby
+# points in a small cross/grid pattern around the detected position to
+# greatly increase the odds of actually landing on the bobber -- any
+# clicks that miss just land harmlessly on water.
+reel_click_spray_offsets = [
+    (0, 0), (0, -4), (0, 4), (-4, 0), (4, 0),
+    (-3, -3), (3, -3), (-3, 3), (3, 3),
+]
+reel_click_spray_delay = 0.12  # pause between consecutive spray click attempts
 wow_window_title_substring = "World of Warcraft"  # used to find & focus the game window before sending input
 #endregion
 

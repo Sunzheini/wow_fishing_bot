@@ -146,9 +146,12 @@ class FishingBot:
                     if bobber_position is not None:
                         state = FishingState.WATCHING_FOR_SPLASH
                     elif bobber_search_attempts >= max_bobber_search_attempts:
-                        state = FishingState.STOPPED
-                        logger.warning("Bobber not found within %d attempts; stopping.",
-                                        max_bobber_search_attempts)
+                        # No bobber found within the search window -- this can
+                        # happen (missed cast, obstructed view, etc.), so
+                        # recast rather than stopping the whole bot.
+                        state = FishingState.IDLE
+                        logger.info("Bobber not found within %d attempts; recasting.",
+                                    max_bobber_search_attempts)
                     else:
                         # Stay in WAITING_FOR_BOBBER and retry after a short delay.
                         sleep(bobber_search_retry_delay_seconds)

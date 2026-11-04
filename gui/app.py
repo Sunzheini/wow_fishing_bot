@@ -17,6 +17,7 @@ from core.screenshot_capture import ScreenshotCapture
 from support.app_logging import get_logger
 from support.constants import gui_window_title, gui_window_size, gui_poll_interval_ms, \
     gui_step_color_active, gui_step_color_stopped, gui_step_color_inactive, gui_log_font
+from support.window_utils import enable_dpi_awareness
 
 logger = get_logger(__name__)
 
@@ -235,6 +236,7 @@ class FishingBotApp:
 
 
 def main() -> None:
+    enable_dpi_awareness()
     root = tk.Tk()
     FishingBotApp(root)
     root.mainloop()

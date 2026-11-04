@@ -86,18 +86,28 @@ def test_happy_path_casts_finds_bobber_detects_splash_and_reels_in(mocks):
     assert FishingState.REELING in state_changes
 
 
-def test_stops_after_max_bobber_search_attempts_when_bobber_never_found(mocks, monkeypatch):
+def test_recasts_after_max_bobber_search_attempts_when_bobber_never_found(mocks, monkeypatch):
     """
     If find_bobber() always returns None, the state machine must give up
-    after max_bobber_search_attempts attempts and never reel in.
+    searching after max_bobber_search_attempts attempts and recast
+    (go back to IDLE -> CASTING) rather than stopping entirely.
     """
     monkeypatch.setattr(fishing_bot_module, "max_bobber_search_attempts", 3)
     mocks["object_detection"].find_bobber.return_value = None
+
+    # 6 iterations for one full "bobber never found" cycle + the start of
+    # a recast: IDLE, CASTING, WAITING_FOR_BOBBER x3 (gives up, back to
+    # IDLE), IDLE (recast, casts again). Plus the startup countdown's
+    # checks. Stop right after to keep the test fast.
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 6) + [True] * 100
 
     FishingBot().run()
 
     assert mocks["object_detection"].find_bobber.call_count == 3
     mocks["controls_interaction"].reel_in_bobber.assert_not_called()
+    # Recast actually happened: cast_fishing_line called once for the
+    # original cast, and again for the recast.
+    assert mocks["controls_interaction"].cast_fishing_line.call_count == 2
 
 
 def test_rejects_static_bobber_candidate_and_keeps_searching(mocks, monkeypatch):
@@ -110,6 +120,9 @@ def test_rejects_static_bobber_candidate_and_keeps_searching(mocks, monkeypatch)
     monkeypatch.setattr(fishing_bot_module, "max_bobber_search_attempts", 3)
     mocks["object_detection"].find_bobber.return_value = (123, 456)
     mocks["object_detection"].is_bobber_candidate_static.return_value = True
+
+    # Same cycle shape as the "bobber never found" recast test above.
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 6) + [True] * 100
 
     FishingBot().run()
 
@@ -185,7 +198,11 @@ def test_run_counts_down_start_delay_seconds_before_the_first_cast(mocks, mock_s
     before doing anything else, and log each remaining second (so it's
     visible in the GUI's log panel).
     """
-    mocks["object_detection"].find_bobber.return_value = None  # stop quickly after countdown
+    mocks["object_detection"].find_bobber.return_value = None
+    # Stop right after the countdown + first IDLE/CASTING/WAITING_FOR_BOBBER
+    # iteration, since find_bobber() never finding anything now causes a
+    # recast loop instead of stopping on its own.
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 3) + [True] * 100
 
     import logging
     with caplog.at_level(logging.INFO, logger="core.fishing_bot"):

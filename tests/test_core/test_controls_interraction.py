@@ -4,7 +4,8 @@ import pytest
 
 import core.controls_interaction as controls_interaction_module
 from support.constants import fishing_keybind, key_press_duration, mouse_move_duration, \
-    reel_click_button, reel_click_modifier_key, wow_window_title_substring
+    reel_click_button, reel_click_modifier_key, reel_modifier_press_delay, reel_click_hold_duration, \
+    reel_modifier_release_delay, reel_click_spray_offsets, reel_click_spray_delay, wow_window_title_substring
 
 
 @pytest.fixture(autouse=True)
@@ -55,34 +56,51 @@ def test_cast_fishing_line_presses_and_releases_the_configured_key(objects, mock
            mock_pydirectinput.mock_calls.index(call.keyUp(fishing_keybind))
 
 
-def test_reel_in_bobber_moves_mouse_then_shift_right_clicks(objects, mock_pydirectinput):
+def test_reel_in_bobber_sprays_clicks_around_the_detected_position(objects, mock_pydirectinput, mock_sleep):
     """
-    reel_in_bobber() must move the mouse to the given position, hold the
-    modifier key (shift), right-click, then release the modifier key --
-    all in the correct order.
+    reel_in_bobber() must hold the modifier key once, then try every
+    configured nearby offset point (moveTo -> press+release the mouse
+    button, with timed delays), finally releasing the modifier key only
+    after all spray points have been attempted. This greatly increases
+    the odds of landing on WoW's tiny fishing bobber hitbox.
     """
     controls_interaction = objects['controls_interaction']
     position = (123, 456)
 
     controls_interaction.reel_in_bobber(position)
 
-    mock_pydirectinput.moveTo.assert_called_once_with(123, 456, duration=mouse_move_duration)
+    expected_move_calls = [
+        call(123 + dx, 456 + dy, duration=mouse_move_duration) for dx, dy in reel_click_spray_offsets
+    ]
+    assert mock_pydirectinput.moveTo.call_args_list == expected_move_calls
+
     mock_pydirectinput.keyDown.assert_called_once_with(reel_click_modifier_key)
-    mock_pydirectinput.click.assert_called_once_with(button=reel_click_button)
+    assert mock_pydirectinput.mouseDown.call_count == len(reel_click_spray_offsets)
+    assert mock_pydirectinput.mouseUp.call_count == len(reel_click_spray_offsets)
+    mock_pydirectinput.mouseDown.assert_called_with(button=reel_click_button)
+    mock_pydirectinput.mouseUp.assert_called_with(button=reel_click_button)
     mock_pydirectinput.keyUp.assert_called_once_with(reel_click_modifier_key)
 
-    call_order = [c[0] for c in mock_pydirectinput.method_calls]
-    assert call_order == ["moveTo", "keyDown", "click", "keyUp"]
+    # keyDown(shift) happens before the first click, keyUp(shift) is the very last call overall.
+    mock_calls = mock_pydirectinput.mock_calls
+    assert mock_calls.index(call.keyDown(reel_click_modifier_key)) < \
+           mock_calls.index(call.mouseDown(button=reel_click_button))
+    assert mock_calls[-1] == call.keyUp(reel_click_modifier_key)
+
+    mock_sleep.assert_any_call(reel_modifier_press_delay)
+    mock_sleep.assert_any_call(reel_click_hold_duration)
+    mock_sleep.assert_any_call(reel_modifier_release_delay)
+    mock_sleep.assert_any_call(reel_click_spray_delay)
 
 
 def test_reel_in_bobber_releases_modifier_key_even_if_click_fails(objects, mock_pydirectinput):
     """
-    If pydirectinput.click() raises, the modifier key must still be
+    If pydirectinput.mouseDown() raises, the modifier key must still be
     released afterward (no stuck Shift key), even though the exception
     then propagates (handle_errors default is reraise=True).
     """
     controls_interaction = objects['controls_interaction']
-    mock_pydirectinput.click.side_effect = RuntimeError("simulated click failure")
+    mock_pydirectinput.mouseDown.side_effect = RuntimeError("simulated click failure")
 
     with pytest.raises(RuntimeError):
         controls_interaction.reel_in_bobber((10, 20))

@@ -2,7 +2,20 @@ import time
 import tkinter as tk
 import uuid
 
-from support.window_utils import focus_window_by_title_substring
+from support.window_utils import enable_dpi_awareness, focus_window_by_title_substring
+
+
+def test_enable_dpi_awareness_does_not_raise():
+    """
+    enable_dpi_awareness() must not raise on a normal Windows system,
+    regardless of which of its internal fallback APIs actually succeeds.
+    Calling it more than once (as a real process restart sequence would
+    allow, or just across multiple test runs in the same session) must
+    also not raise, even though the underlying Win32 APIs can reject a
+    second real DPI-awareness change for the process.
+    """
+    enable_dpi_awareness()
+    enable_dpi_awareness()  # calling again must stay safe (no raise)
 
 
 def test_returns_false_when_no_window_matches():
