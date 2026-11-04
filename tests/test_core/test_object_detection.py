@@ -218,6 +218,34 @@ def test_multi_scale_match_prefers_the_best_scoring_scale(objects):
     assert best_score > 0.9  # this fixture was cropped from this exact screenshot
 
 
+def test_top_n_match_locations_returns_distinct_sorted_candidates(objects):
+    """
+    __top_n_match_locations must return results sorted best-first, with
+    no two candidates closer together than min_distance -- otherwise
+    near-duplicate matches at adjacent pixels/scales would dominate the
+    top-N instead of genuinely distinct candidate locations.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    frame_gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+
+    candidates = ObjectDetection._ObjectDetection__top_n_match_locations(
+        frame_gray, object_detection.bobber_template_gray, [0.5, 1.0, 1.5], n=3, min_distance=50
+    )
+
+    assert len(candidates) >= 1
+    assert len(candidates) <= 3
+    scores = [c[0] for c in candidates]
+    assert scores == sorted(scores, reverse=True)
+    assert scores[0] > 0.9  # the real bobber match, same fixture as above
+
+    locations = [c[1] for c in candidates]
+    for i in range(len(locations)):
+        for j in range(i + 1, len(locations)):
+            dist = ((locations[i][0] - locations[j][0]) ** 2 + (locations[i][1] - locations[j][1]) ** 2) ** 0.5
+            assert dist >= 50
+
+
 # ----- Color-blob fallback -----------------------------------------------------
 
 def test_find_bobber_uses_color_fallback_when_template_score_is_low(objects, monkeypatch):
@@ -241,6 +269,46 @@ def test_find_bobber_uses_color_fallback_when_template_score_is_low(objects, mon
     # match, so allow a more generous tolerance.
     assert abs(position[0] - expected_x) <= 30
     assert abs(position[1] - expected_y) <= 30
+
+
+def test_find_bobber_tries_next_candidate_when_best_scoring_seed_is_a_false_lead(objects, monkeypatch):
+    """
+    Regression test for a real missed detection: the single
+    GLOBAL-best-scoring template location is not always the real
+    bobber -- an unrelated location elsewhere can occasionally score
+    almost identically (or even higher). find_bobber() must still find
+    the bobber via a lower-ranked candidate rather than giving up after
+    the top candidate's color-blob search fails.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    monkeypatch.setattr(object_detection_module, "bobber_match_threshold", 1.01)
+
+    from support.constants import bobber_search_region_x_fraction, bobber_search_region_y_fraction
+    full_height, full_width = frame.image.shape[:2]
+    x_start, _ = ObjectDetection._ObjectDetection__fraction_bounds(full_width, bobber_search_region_x_fraction)
+    y_start, _ = ObjectDetection._ObjectDetection__fraction_bounds(full_height, bobber_search_region_y_fraction)
+
+    real_x, real_y = KNOWN_BOBBER_POSITION
+    template_height, template_width = object_detection.bobber_template_gray.shape[:2]
+    # Top-left location (relative to the cropped search region) that
+    # would produce KNOWN_BOBBER_POSITION as its center.
+    real_seed_local = (real_x - template_width // 2 - x_start, real_y - template_height // 2 - y_start)
+    fake_seed_local = (10, 10)  # a location far from the real bobber, with no feather colors nearby
+
+    fake_candidate = (0.90, fake_seed_local, (template_height, template_width))  # ranked first, but false
+    real_candidate = (0.85, real_seed_local, (template_height, template_width))  # ranked second, genuine
+
+    monkeypatch.setattr(
+        ObjectDetection, "_ObjectDetection__top_n_match_locations",
+        staticmethod(lambda *args, **kwargs: [fake_candidate, real_candidate])
+    )
+
+    position = object_detection.find_bobber(frame)
+
+    assert position is not None
+    assert abs(position[0] - real_x) <= 30
+    assert abs(position[1] - real_y) <= 30
 
 
 def test_find_bobber_returns_none_without_seed_when_template_missing(objects, monkeypatch):

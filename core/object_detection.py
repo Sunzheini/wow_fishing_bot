@@ -13,8 +13,8 @@ from support.constants import assets_dir_name, templates_dir_name, bobber_templa
     bobber_motion_min_diff, bobber_color_check_radius, bobber_color_min_saturation, bobber_color_min_value, \
     bobber_color_blue_hue_range, bobber_color_red_hue_ranges, bobber_color_min_blue_pixels, \
     bobber_color_min_red_pixels, bobber_color_fallback_min_blob_area, bobber_color_fallback_max_pair_distance, \
-    bobber_color_fallback_search_radius, splash_region_radius, splash_brightness_threshold, \
-    splash_pixel_ratio_threshold
+    bobber_color_fallback_search_radius, bobber_fallback_seed_candidates, bobber_fallback_seed_min_distance, \
+    splash_region_radius, splash_brightness_threshold, splash_pixel_ratio_threshold
 
 logger = get_logger(__name__)
 
@@ -99,6 +99,54 @@ class ObjectDetection:
 
         return best_score, best_loc, best_shape
 
+    @staticmethod
+    def __top_n_match_locations(search_image_gray: np.ndarray, template_gray: np.ndarray,
+                                 scales: list[float], n: int,
+                                 min_distance: int) -> list[tuple[float, tuple[int, int], tuple[int, int]]]:
+        """
+        Like __multi_scale_match, but returns up to `n` distinct
+        (score, top_left_location, (height, width)) results across all
+        scales, sorted best-first, instead of just the single best.
+
+        "Distinct" means mutually separated by at least `min_distance`
+        pixels -- otherwise matches from adjacent scales/pixels at
+        essentially the same spot would dominate the top-N instead of
+        genuinely different candidate locations. This matters because
+        the single global-best-scoring location is not always the real
+        bobber: an unrelated spot elsewhere can occasionally score
+        almost identically, so trying several distinct candidates as
+        fallback seeds is far more robust than trusting only the best one.
+        """
+        all_results = []
+        search_height, search_width = search_image_gray.shape[:2]
+        original_height, original_width = template_gray.shape[:2]
+
+        for scale in scales:
+            scaled_height = max(1, int(original_height * scale))
+            scaled_width = max(1, int(original_width * scale))
+            if scaled_height >= search_height or scaled_width >= search_width:
+                continue
+
+            resized_template = cv2.resize(template_gray, (scaled_width, scaled_height))
+            result = cv2.matchTemplate(search_image_gray, resized_template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            all_results.append((max_val, max_loc, (scaled_height, scaled_width)))
+
+        all_results.sort(key=lambda r: r[0], reverse=True)
+
+        selected: list[tuple[float, tuple[int, int], tuple[int, int]]] = []
+        for score, loc, shape in all_results:
+            if len(selected) >= n:
+                break
+            is_distinct = all(
+                ((loc[0] - other_loc[0]) ** 2 + (loc[1] - other_loc[1]) ** 2) ** 0.5 >= min_distance
+                for _, other_loc, _ in selected
+            )
+            if is_distinct:
+                selected.append((score, loc, shape))
+
+        return selected
+
     @handle_errors()
     def find_bobber(self, frame: ScreenshotFrame) -> Optional[tuple[int, int]]:
         """
@@ -121,58 +169,57 @@ class ObjectDetection:
         x_start, x_end = self.__fraction_bounds(full_width, bobber_search_region_x_fraction)
         y_start, y_end = self.__fraction_bounds(full_height, bobber_search_region_y_fraction)
 
-        seed_position = None
-
-        if self.bobber_template_gray is not None:
-            frame_gray_full = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
-            frame_gray = frame_gray_full[y_start:y_end, x_start:x_end]
-            template_height, template_width = self.bobber_template_gray.shape[:2]
-
-            if frame_gray.shape[0] >= template_height and frame_gray.shape[1] >= template_width:
-                max_val, max_loc, (matched_height, matched_width) = self.__multi_scale_match(
-                    frame_gray, self.bobber_template_gray, bobber_match_scales
-                )
-
-                local_x = max_loc[0] + matched_width // 2 + x_start
-                local_y = max_loc[1] + matched_height // 2 + y_start
-                screen_x = frame.origin[0] + local_x
-                screen_y = frame.origin[1] + local_y
-
-                if max_val >= bobber_match_threshold:
-                    logger.info("Bobber found at screen (%d, %d), score %.3f (threshold %.3f)",
-                                screen_x, screen_y, max_val, bobber_match_threshold)
-                    return screen_x, screen_y
-
-                # Even a below-threshold match is still a useful rough
-                # location seed for the color-blob fallback below --
-                # empirically, the template's best guess tends to land
-                # close to the real bobber even when the shape score
-                # itself isn't high enough to trust on its own.
-                seed_position = (local_x, local_y)
-                logger.info(
-                    "Template match below threshold: best score %.3f < %.3f (best guess was at screen (%d, %d)); "
-                    "trying color-blob fallback near that guess.",
-                    max_val, bobber_match_threshold, screen_x, screen_y
-                )
-            else:
-                logger.warning("Search region is smaller than the bobber template; skipping template match.")
-        else:
+        if self.bobber_template_gray is None:
             logger.info("Bobber template not loaded; cannot locate the bobber.")
             return None
 
-        # The color-blob fallback requires a template-based seed location
-        # to search near -- without one, scanning the entire central
-        # region is too noisy (real gameplay screenshots contain many
-        # small stray blue/red specks from water highlights, foliage,
-        # etc.) and was confirmed to latch onto unrelated noise pairs.
-        if seed_position is None:
-            logger.info("Bobber NOT found (no usable template match to seed the color-blob fallback).")
+        frame_gray_full = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+        frame_gray = frame_gray_full[y_start:y_end, x_start:x_end]
+        template_height, template_width = self.bobber_template_gray.shape[:2]
+
+        if frame_gray.shape[0] < template_height or frame_gray.shape[1] < template_width:
+            logger.warning("Search region is smaller than the bobber template; skipping template match.")
             return None
 
-        fallback_position = self.__find_bobber_by_color(frame, x_start, x_end, y_start, y_end, seed_position)
-        if fallback_position is not None:
-            logger.info("Bobber found via color-blob fallback at screen %s.", fallback_position)
-            return fallback_position
+        candidates = self.__top_n_match_locations(
+            frame_gray, self.bobber_template_gray, bobber_match_scales,
+            bobber_fallback_seed_candidates, bobber_fallback_seed_min_distance
+        )
+        if not candidates:
+            logger.info("Bobber NOT found (no template match candidates at all).")
+            return None
+
+        best_val, best_loc, (best_matched_height, best_matched_width) = candidates[0]
+        best_local_x = best_loc[0] + best_matched_width // 2 + x_start
+        best_local_y = best_loc[1] + best_matched_height // 2 + y_start
+        best_screen_x = frame.origin[0] + best_local_x
+        best_screen_y = frame.origin[1] + best_local_y
+
+        if best_val >= bobber_match_threshold:
+            logger.info("Bobber found at screen (%d, %d), score %.3f (threshold %.3f)",
+                        best_screen_x, best_screen_y, best_val, bobber_match_threshold)
+            return best_screen_x, best_screen_y
+
+        logger.info(
+            "Template match below threshold: best score %.3f < %.3f (best guess was at screen (%d, %d)); "
+            "trying color-blob fallback near %d candidate location(s).",
+            best_val, bobber_match_threshold, best_screen_x, best_screen_y, len(candidates)
+        )
+
+        # The single global-best-scoring location is not always the real
+        # bobber -- an unrelated location elsewhere can occasionally
+        # score almost identically. Try each distinct candidate as a
+        # fallback seed in turn, not just the best one.
+        for score, loc, (matched_height, matched_width) in candidates:
+            local_x = loc[0] + matched_width // 2 + x_start
+            local_y = loc[1] + matched_height // 2 + y_start
+            seed_position = (local_x, local_y)
+
+            fallback_position = self.__find_bobber_by_color(frame, x_start, x_end, y_start, y_end, seed_position)
+            if fallback_position is not None:
+                logger.info("Bobber found via color-blob fallback at screen %s (seed score %.3f).",
+                            fallback_position, score)
+                return fallback_position
 
         logger.info("Bobber NOT found (template match and color-blob fallback both failed).")
         return None

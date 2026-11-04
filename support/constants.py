@@ -117,6 +117,16 @@ bobber_color_fallback_max_pair_distance = 60  # max pixel distance between a blu
 # central region. Falls back to the full central region only if no
 # template is loaded at all (no seed available).
 bobber_color_fallback_search_radius = 100  # pixels around the template's best guess to search for color blobs
+# Confirmed via a real missed detection: the template's single
+# GLOBAL-best-scoring location is not always the real bobber -- an
+# unrelated location elsewhere in the frame can occasionally score
+# almost identically (both ~0.467 in one observed case), causing the
+# fallback to search in the wrong place entirely and miss a bobber that
+# would otherwise have passed the color check. Trying several of the
+# top-scoring (but mutually distant) candidate locations as fallback
+# seeds, instead of just the single best one, makes this far more robust.
+bobber_fallback_seed_candidates = 4  # how many distinct top-scoring locations to try as fallback seeds
+bobber_fallback_seed_min_distance = 80  # min pixel distance between candidate seeds to count as "distinct"
 
 # The splash is a randomly-scattered particle/foam effect -- the
 # relative positions of its bright pixels differ every time, even
