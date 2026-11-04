@@ -9,7 +9,8 @@ from core.ocr_recognition import OcrRecognition
 from core.screenshot_capture import ScreenshotCapture
 from support.app_logging import get_logger
 from support.constants import max_state_machine_iterations, max_splash_watch_attempts, cast_animation_wait_seconds, \
-    max_bobber_search_attempts, bobber_search_retry_delay_seconds, wait_time_between_screenshots, start_delay_seconds
+    max_bobber_search_attempts, bobber_search_retry_delay_seconds, wait_time_between_screenshots, \
+    start_delay_seconds, bobber_motion_check_delay_seconds
 
 logger = get_logger(__name__)
 
@@ -123,7 +124,24 @@ class FishingBot:
                     logger.info("Looking for bobber: attempt %d/%d", bobber_search_attempts,
                                 max_bobber_search_attempts)
 
-                    bobber_position = object_detection.find_bobber(screenshot_frame)
+                    candidate_position = object_detection.find_bobber(screenshot_frame)
+
+                    if candidate_position is not None:
+                        # Confirm this isn't a static background/UI false
+                        # positive by checking for at least a little
+                        # natural water motion before committing to it.
+                        sleep(bobber_motion_check_delay_seconds)
+                        confirm_frame = screenshot_capture.capture_screenshot(screenshot_number)
+                        screenshot_number += 1
+
+                        if object_detection.is_bobber_candidate_static(
+                            screenshot_frame, confirm_frame, candidate_position
+                        ):
+                            logger.warning("Rejecting bobber candidate at %s: area is static (likely a "
+                                            "false positive, not real water).", candidate_position)
+                            candidate_position = None
+
+                    bobber_position = candidate_position
 
                     if bobber_position is not None:
                         state = FishingState.WATCHING_FOR_SPLASH

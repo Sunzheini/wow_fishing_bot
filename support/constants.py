@@ -37,6 +37,18 @@ bobber_search_retry_delay_seconds = 0.5  # delay between WAITING_FOR_BOBBER retr
 emergency_stop_hotkey = "esc"  # global hotkey that immediately stops the bot
 #endregion
 
+#region Bobber Motion Confirmation Constants
+# Template matching can occasionally lock onto a static background/UI
+# element that happens to resemble the bobber template (a false
+# positive). Real water (with a real bobber on it) always has at least
+# subtle ripple motion, so after finding a candidate we take one more
+# quick screenshot and reject the candidate if that area is suspiciously
+# frozen (pixel-identical) between the two frames.
+bobber_motion_check_delay_seconds = 0.3  # gap between the two confirmation frames
+bobber_motion_check_radius = 20  # pixels around the candidate position to check for motion
+bobber_motion_min_diff = 15  # min per-pixel BGR-sum difference required to call it "moving water"
+#endregion
+
 #region Object Detection Constants
 assets_dir_name = "assets"
 templates_dir_name = "templates"
@@ -49,7 +61,7 @@ bobber_match_threshold = 0.65  # cv2.matchTemplate TM_CCOEFF_NORMED score requir
 bobber_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]
 
 splash_template_file_name = "splash.jpg"  # cropped reference image of the splash/foam effect
-splash_match_threshold = 0.7  # cv2.matchTemplate TM_CCOEFF_NORMED score required to accept a splash match
+splash_match_threshold = 0.8  # cv2.matchTemplate TM_CCOEFF_NORMED score required to accept a splash match
 splash_search_radius = 80  # pixels around the bobber position to search for the splash template
 splash_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]  # same rationale as bobber_match_scales
 #endregion
@@ -65,7 +77,7 @@ wow_window_title_substring = "World of Warcraft"  # used to find & focus the gam
 
 #region GUI Constants
 gui_window_title = "WoW Fishing Bot"
-gui_window_size = "560x520"
+gui_window_size = "560x660"
 gui_poll_interval_ms = 150  # how often the GUI polls the background bot thread's log/state queue
 gui_step_color_active = "#2e7d32"  # green background for the currently active step
 gui_step_color_stopped = "#b71c1c"  # red background for the STOPPED step when reached

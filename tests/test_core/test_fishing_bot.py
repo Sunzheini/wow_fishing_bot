@@ -39,6 +39,10 @@ def mocks(monkeypatch):
     # Default: stop never requested, unless a test overrides it.
     emergency_stop.is_stop_requested.return_value = False
 
+    # Default: any found bobber candidate passes the motion check (real
+    # water, not a static false positive), unless a test overrides it.
+    object_detection.is_bobber_candidate_static.return_value = False
+
     # capture_screenshot just needs to return some ScreenshotFrame; content doesn't matter
     # since object_detection is fully mocked too.
     screenshot_capture.capture_screenshot.return_value = ScreenshotFrame(
@@ -94,6 +98,47 @@ def test_stops_after_max_bobber_search_attempts_when_bobber_never_found(mocks, m
 
     assert mocks["object_detection"].find_bobber.call_count == 3
     mocks["controls_interaction"].reel_in_bobber.assert_not_called()
+
+
+def test_rejects_static_bobber_candidate_and_keeps_searching(mocks, monkeypatch):
+    """
+    If find_bobber() returns a candidate but is_bobber_candidate_static()
+    says that area is frozen (a likely false positive, e.g. a static
+    background/UI element), the state machine must reject it and keep
+    searching rather than committing to it.
+    """
+    monkeypatch.setattr(fishing_bot_module, "max_bobber_search_attempts", 3)
+    mocks["object_detection"].find_bobber.return_value = (123, 456)
+    mocks["object_detection"].is_bobber_candidate_static.return_value = True
+
+    FishingBot().run()
+
+    assert mocks["object_detection"].find_bobber.call_count == 3
+    assert mocks["object_detection"].is_bobber_candidate_static.call_count == 3
+    mocks["controls_interaction"].reel_in_bobber.assert_not_called()
+
+
+def test_accepts_bobber_candidate_once_motion_confirms_real_water(mocks):
+    """
+    If is_bobber_candidate_static() says the area is moving (real
+    water), the candidate must be accepted and the state machine must
+    proceed to WATCHING_FOR_SPLASH.
+    """
+    bobber_position = (123, 456)
+    mocks["object_detection"].find_bobber.return_value = bobber_position
+    mocks["object_detection"].is_bobber_candidate_static.return_value = False
+    mocks["object_detection"].detect_splash.return_value = True  # reel in immediately
+
+    # 5 main-loop iterations for one full cycle (IDLE, CASTING,
+    # WAITING_FOR_BOBBER, WATCHING_FOR_SPLASH, REELING), plus
+    # start_delay_seconds countdown checks before that. Stop right after
+    # so the loop doesn't start a second cycle.
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 5) + [True] * 100
+
+    FishingBot().run()
+
+    mocks["object_detection"].find_bobber.assert_called_once()
+    mocks["controls_interaction"].reel_in_bobber.assert_called_once_with(bobber_position)
 
 
 def test_recasts_after_max_splash_watch_attempts_when_splash_never_detected(mocks, monkeypatch):

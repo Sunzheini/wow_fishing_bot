@@ -9,7 +9,7 @@ from support.app_error_handling import TemplateNotFoundError, handle_errors
 from support.app_logging import get_logger
 from support.constants import assets_dir_name, templates_dir_name, bobber_template_file_name, \
     bobber_match_threshold, bobber_match_scales, splash_template_file_name, splash_match_threshold, \
-    splash_search_radius, splash_match_scales
+    splash_search_radius, splash_match_scales, bobber_motion_check_radius, bobber_motion_min_diff
 
 logger = get_logger(__name__)
 
@@ -130,6 +130,51 @@ class ObjectDetection:
         logger.info("Bobber found at screen (%d, %d), score %.3f (threshold %.3f)",
                     screen_x, screen_y, max_val, bobber_match_threshold)
         return screen_x, screen_y
+
+    @handle_errors()
+    def is_bobber_candidate_static(self, frame_a: ScreenshotFrame, frame_b: ScreenshotFrame,
+                                    position: tuple[int, int]) -> bool:
+        """
+        Returns True if the small area around `position` is suspiciously
+        frozen (near pixel-identical) between `frame_a` and `frame_b`.
+
+        Template matching can occasionally lock onto a static background
+        or UI element that happens to resemble the bobber template --
+        real water (with a real bobber floating on it) always has at
+        least subtle ripple motion, so a completely static match is a
+        strong signal of a false positive.
+        """
+        region_a = self.__extract_region(frame_a, position, bobber_motion_check_radius)
+        region_b = self.__extract_region(frame_b, position, bobber_motion_check_radius)
+        if region_a is None or region_b is None or region_a.shape != region_b.shape:
+            # Can't compare -- don't block on an inconclusive check.
+            return False
+
+        diff = cv2.absdiff(region_a, region_b)
+        max_diff = int(diff.sum(axis=2).max())
+        is_static = max_diff < bobber_motion_min_diff
+
+        logger.info("Motion check near %s: max pixel diff=%d (min required=%d) -> %s",
+                    position, max_diff, bobber_motion_min_diff, "STATIC (likely false positive)" if is_static
+                    else "moving (real water)")
+        return is_static
+
+    @staticmethod
+    def __extract_region(frame: ScreenshotFrame, position: tuple[int, int], radius: int) -> Optional[np.ndarray]:
+        """Crops a square BGR region of the given radius around `position` (absolute screen coordinates)."""
+        local_x = position[0] - frame.origin[0]
+        local_y = position[1] - frame.origin[1]
+
+        height, width = frame.image.shape[:2]
+        x_start = max(0, local_x - radius)
+        x_end = min(width, local_x + radius)
+        y_start = max(0, local_y - radius)
+        y_end = min(height, local_y + radius)
+
+        if x_start >= x_end or y_start >= y_end:
+            return None
+
+        return frame.image[y_start:y_end, x_start:x_end]
 
     @handle_errors()
     def detect_splash(self, frame: ScreenshotFrame, bobber_position: tuple[int, int]) -> bool:
