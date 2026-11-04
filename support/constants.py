@@ -183,7 +183,8 @@ reel_click_spray_delay = 0.05  # pause between consecutive spray click attempts
 # any chance of it visually interfering with the next screenshot's
 # bobber/splash detection.
 park_mouse_after_reel = True
-park_mouse_position = (0, 0)  # absolute screen coordinates (top-left corner)
+park_mouse_position = (5, 5)  # absolute screen coordinates (near top-left corner)
+park_mouse_move_duration = 0.2  # deliberately longer than mouse_move_duration, so the move is clearly visible
 wow_window_title_substring = "World of Warcraft"  # used to find & focus the game window before sending input
 #endregion
 

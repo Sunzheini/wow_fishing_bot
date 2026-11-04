@@ -6,7 +6,7 @@ import core.controls_interaction as controls_interaction_module
 from support.constants import fishing_keybind, key_press_duration, mouse_move_duration, \
     reel_click_button, reel_click_modifier_key, reel_modifier_press_delay, reel_click_hold_duration, \
     reel_modifier_release_delay, reel_click_spray_offsets, reel_click_spray_delay, park_mouse_position, \
-    wow_window_title_substring
+    park_mouse_move_duration, wow_window_title_substring
 
 
 @pytest.fixture(autouse=True)
@@ -107,8 +107,8 @@ def test_reel_in_bobber_parks_mouse_after_looting(objects, mock_pydirectinput):
     controls_interaction.reel_in_bobber((123, 456))
 
     park_x, park_y = park_mouse_position
-    mock_pydirectinput.moveTo.assert_called_with(park_x, park_y, duration=mouse_move_duration)
-    assert mock_pydirectinput.mock_calls[-1] == call.moveTo(park_x, park_y, duration=mouse_move_duration)
+    mock_pydirectinput.moveTo.assert_called_with(park_x, park_y, duration=park_mouse_move_duration)
+    assert mock_pydirectinput.mock_calls[-1] == call.moveTo(park_x, park_y, duration=park_mouse_move_duration)
 
 
 def test_reel_in_bobber_does_not_park_mouse_if_click_fails(objects, mock_pydirectinput):
@@ -124,7 +124,7 @@ def test_reel_in_bobber_does_not_park_mouse_if_click_fails(objects, mock_pydirec
 
     park_x, park_y = park_mouse_position
     for call_args in mock_pydirectinput.moveTo.call_args_list:
-        assert call_args != call(park_x, park_y, duration=mouse_move_duration)
+        assert call_args != call(park_x, park_y, duration=park_mouse_move_duration)
 
 
 def test_reel_in_bobber_releases_modifier_key_even_if_click_fails(objects, mock_pydirectinput):
