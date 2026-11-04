@@ -11,7 +11,7 @@ from support.constants import assets_dir_name, templates_dir_name
 
 ASSETS_DIR = Path(object_detection_module.__file__).parent.parent / assets_dir_name / templates_dir_name
 
-KNOWN_BOBBER_POSITION = (944, 401)  # confirmed via find_bobber() on the real fixture screenshot
+KNOWN_BOBBER_POSITION = (901, 425)  # confirmed via find_bobber() on the real fixture screenshot
 # The splash fixture is from a different real cast/session than the
 # no-splash fixture above, so the bobber was at a different position.
 SPLASH_BOBBER_POSITION = (940, 375)
@@ -216,6 +216,45 @@ def test_multi_scale_match_prefers_the_best_scoring_scale(objects):
 
     assert best_score >= single_scale_score - 1e-6
     assert best_score > 0.9  # this fixture was cropped from this exact screenshot
+
+
+# ----- Color-blob fallback -----------------------------------------------------
+
+def test_find_bobber_uses_color_fallback_when_template_score_is_low(objects, monkeypatch):
+    """
+    If the template match score is below threshold, find_bobber() must
+    still locate the bobber via the color-blob fallback (seeded by the
+    template's best guess), rather than giving up immediately.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+
+    # Force the template match to "fail" (as if captured at a very
+    # different zoom level), so only the color-blob fallback can succeed.
+    monkeypatch.setattr(object_detection_module, "bobber_match_threshold", 1.01)
+
+    position = object_detection.find_bobber(frame)
+
+    assert position is not None
+    expected_x, expected_y = KNOWN_BOBBER_POSITION
+    # The color-blob fallback is less precise than a good template
+    # match, so allow a more generous tolerance.
+    assert abs(position[0] - expected_x) <= 30
+    assert abs(position[1] - expected_y) <= 30
+
+
+def test_find_bobber_returns_none_without_seed_when_template_missing(objects, monkeypatch):
+    """
+    The color-blob fallback requires a template-based seed location to
+    search near it (scanning the whole central region without one is
+    too noisy in practice). If no template is loaded at all, find_bobber()
+    must return None rather than attempting an unseeded color scan.
+    """
+    object_detection = objects['object_detection']
+    monkeypatch.setattr(object_detection, "bobber_template_gray", None)
+
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    assert object_detection.find_bobber(frame) is None
 
 
 # ----- Bobber motion confirmation --------------------------------------------

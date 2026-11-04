@@ -59,14 +59,18 @@ bobber_match_threshold = 0.70  # cv2.matchTemplate TM_CCOEFF_NORMED score requir
 # recropped for the exact current zoom, search multiple scaled versions
 # of the template and keep whichever scores best.
 bobber_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]
-# The player always casts toward the water roughly in the center of the
-# screen, never right at the very top (which only ever shows sky/wall/UI
-# elements like minimap icons -- one of which was confirmed to
-# consistently produce a false-positive template match score close to
-# real bobber detections). Excluding this top strip from the search
-# entirely is more robust than just raising the match threshold, since
-# real bobber scores can sometimes be just as low.
-bobber_search_exclude_top_fraction = 0.12  # fraction of frame height excluded from the top of the search
+# The player always casts toward the water in a fairly constrained
+# central region of the screen, confirmed directly by the user: when
+# the screen height is divided into 9 equal parts, the bobber only ever
+# appears in parts 2-6 (never the very top -- sky/wall/UI -- or the
+# bottom ~1/3, which includes the action bar); when the width is
+# divided into 9 parts, it only ever appears in parts 4-7 (never near
+# the left/right edges). Restricting the search to exactly this
+# central bounding box (instead of just excluding top/bottom strips)
+# is far more robust: it was the only way to reliably eliminate
+# false-positive matches that kept appearing near screen corners/edges.
+bobber_search_region_x_fraction = (3 / 9, 7 / 9)  # (left, right) as a fraction of frame width
+bobber_search_region_y_fraction = (1 / 9, 6 / 9)  # (top, bottom) as a fraction of frame height
 
 # The bobber's two feathers have distinctive, saturated blue and red
 # colors that plain water never has -- template matching alone works on
@@ -83,6 +87,26 @@ bobber_color_blue_hue_range = (95, 140)  # HSV hue range (0-179) for the blue fe
 bobber_color_red_hue_ranges = [(0, 12), (168, 179)]  # HSV hue wraps around 0/179 for red
 bobber_color_min_blue_pixels = 5  # minimum blue pixels required in the region
 bobber_color_min_red_pixels = 3  # minimum red pixels required in the region
+
+# Template matching (grayscale shape) is sensitive to camera zoom/angle
+# changes between casts/sessions, which repeatedly caused real bobber
+# scores to drop below threshold even right after a successful recrop.
+# The feather colors are far more stable across zoom levels than exact
+# shape, so when the template match fails, fall back to directly
+# scanning for a blue blob near a red blob (the two feathers always sit
+# close together, just above the body) -- independent of template size
+# or exact silhouette entirely.
+bobber_color_fallback_min_blob_area = 15  # minimum connected-component pixel area to count as a real blob (filters noise specks)
+bobber_color_fallback_max_pair_distance = 60  # max pixel distance between a blue blob and red blob centroid
+# Scanning the entire central bounding box for color blobs picks up too
+# much noise (water highlights, distant foliage, etc. can coincidentally
+# look blue/red). The template match's best-guess location -- even when
+# its score is below threshold -- was empirically confirmed to still
+# land close to the real bobber, so use it as a search seed and only
+# look for color blobs within this radius of it, instead of the whole
+# central region. Falls back to the full central region only if no
+# template is loaded at all (no seed available).
+bobber_color_fallback_search_radius = 100  # pixels around the template's best guess to search for color blobs
 
 # The splash is a randomly-scattered particle/foam effect -- the
 # relative positions of its bright pixels differ every time, even

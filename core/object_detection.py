@@ -8,10 +8,13 @@ from core.screenshot_frame import ScreenshotFrame
 from support.app_error_handling import TemplateNotFoundError, handle_errors
 from support.app_logging import get_logger
 from support.constants import assets_dir_name, templates_dir_name, bobber_template_file_name, \
-    bobber_match_threshold, bobber_match_scales, bobber_search_exclude_top_fraction, bobber_motion_check_radius, \
+    bobber_match_threshold, bobber_match_scales, bobber_search_region_x_fraction, \
+    bobber_search_region_y_fraction, bobber_motion_check_radius, \
     bobber_motion_min_diff, bobber_color_check_radius, bobber_color_min_saturation, bobber_color_min_value, \
     bobber_color_blue_hue_range, bobber_color_red_hue_ranges, bobber_color_min_blue_pixels, \
-    bobber_color_min_red_pixels, splash_region_radius, splash_brightness_threshold, splash_pixel_ratio_threshold
+    bobber_color_min_red_pixels, bobber_color_fallback_min_blob_area, bobber_color_fallback_max_pair_distance, \
+    bobber_color_fallback_search_radius, splash_region_radius, splash_brightness_threshold, \
+    splash_pixel_ratio_threshold
 
 logger = get_logger(__name__)
 
@@ -103,47 +106,162 @@ class ObjectDetection:
         matching (robust to camera zoom differences between when
         bobber.jpg was captured and the current session). Returns the
         bobber's (x, y) position in absolute screen coordinates, or None
-        if no sufficiently confident match is found at any scale.
+        if no sufficiently confident match is found at any scale and the
+        color-blob fallback (see below) also fails.
 
-        The top `bobber_search_exclude_top_fraction` of the frame is
-        excluded from the search entirely: the bobber is always cast
-        toward the water near screen center, never at the very top
-        (which only shows sky/wall/UI elements) -- one of which was
-        confirmed to otherwise produce a persistent false-positive match.
+        The search is restricted to a central bounding box
+        (`bobber_search_region_x_fraction` / `_y_fraction`), confirmed
+        directly against real gameplay: the bobber only ever lands
+        within a fairly constrained central region, never near the
+        screen edges/corners (sky/wall/UI elements, the action bar,
+        etc. all live outside this box) -- several of which were
+        confirmed to otherwise produce persistent false-positive matches.
         """
-        if self.bobber_template_gray is None:
+        full_height, full_width = frame.image.shape[:2]
+        x_start, x_end = self.__fraction_bounds(full_width, bobber_search_region_x_fraction)
+        y_start, y_end = self.__fraction_bounds(full_height, bobber_search_region_y_fraction)
+
+        seed_position = None
+
+        if self.bobber_template_gray is not None:
+            frame_gray_full = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+            frame_gray = frame_gray_full[y_start:y_end, x_start:x_end]
+            template_height, template_width = self.bobber_template_gray.shape[:2]
+
+            if frame_gray.shape[0] >= template_height and frame_gray.shape[1] >= template_width:
+                max_val, max_loc, (matched_height, matched_width) = self.__multi_scale_match(
+                    frame_gray, self.bobber_template_gray, bobber_match_scales
+                )
+
+                local_x = max_loc[0] + matched_width // 2 + x_start
+                local_y = max_loc[1] + matched_height // 2 + y_start
+                screen_x = frame.origin[0] + local_x
+                screen_y = frame.origin[1] + local_y
+
+                if max_val >= bobber_match_threshold:
+                    logger.info("Bobber found at screen (%d, %d), score %.3f (threshold %.3f)",
+                                screen_x, screen_y, max_val, bobber_match_threshold)
+                    return screen_x, screen_y
+
+                # Even a below-threshold match is still a useful rough
+                # location seed for the color-blob fallback below --
+                # empirically, the template's best guess tends to land
+                # close to the real bobber even when the shape score
+                # itself isn't high enough to trust on its own.
+                seed_position = (local_x, local_y)
+                logger.info(
+                    "Template match below threshold: best score %.3f < %.3f (best guess was at screen (%d, %d)); "
+                    "trying color-blob fallback near that guess.",
+                    max_val, bobber_match_threshold, screen_x, screen_y
+                )
+            else:
+                logger.warning("Search region is smaller than the bobber template; skipping template match.")
+        else:
+            logger.info("Bobber template not loaded; cannot locate the bobber.")
             return None
 
-        frame_gray_full = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
-        full_height = frame_gray_full.shape[0]
-        top_exclude_pixels = int(full_height * bobber_search_exclude_top_fraction)
-        frame_gray = frame_gray_full[top_exclude_pixels:, :]
-
-        template_height, template_width = self.bobber_template_gray.shape[:2]
-
-        if frame_gray.shape[0] < template_height or frame_gray.shape[1] < template_width:
-            logger.warning("Frame is smaller than the bobber template; skipping match.")
+        # The color-blob fallback requires a template-based seed location
+        # to search near -- without one, scanning the entire central
+        # region is too noisy (real gameplay screenshots contain many
+        # small stray blue/red specks from water highlights, foliage,
+        # etc.) and was confirmed to latch onto unrelated noise pairs.
+        if seed_position is None:
+            logger.info("Bobber NOT found (no usable template match to seed the color-blob fallback).")
             return None
 
-        max_val, max_loc, (matched_height, matched_width) = self.__multi_scale_match(
-            frame_gray, self.bobber_template_gray, bobber_match_scales
-        )
+        fallback_position = self.__find_bobber_by_color(frame, x_start, x_end, y_start, y_end, seed_position)
+        if fallback_position is not None:
+            logger.info("Bobber found via color-blob fallback at screen %s.", fallback_position)
+            return fallback_position
 
-        local_x = max_loc[0] + matched_width // 2
-        local_y = max_loc[1] + matched_height // 2 + top_exclude_pixels
-        screen_x = frame.origin[0] + local_x
-        screen_y = frame.origin[1] + local_y
+        logger.info("Bobber NOT found (template match and color-blob fallback both failed).")
+        return None
 
-        if max_val < bobber_match_threshold:
-            logger.info(
-                "Bobber NOT found: best score %.3f < threshold %.3f (best guess was at screen (%d, %d))",
-                max_val, bobber_match_threshold, screen_x, screen_y
-            )
+    @staticmethod
+    def __fraction_bounds(size: int, fraction_range: tuple[float, float]) -> tuple[int, int]:
+        """Converts a (low, high) fraction range into (start, end) pixel bounds for a dimension of length `size`."""
+        low, high = fraction_range
+        return int(size * low), int(size * high)
+
+    @staticmethod
+    def __find_bobber_by_color(frame: ScreenshotFrame, x_start: int, x_end: int, y_start: int, y_end: int,
+                                seed_position: Optional[tuple[int, int]]) -> Optional[tuple[int, int]]:
+        """
+        Locates the bobber by looking for a blue-ish blob positioned
+        near a red-ish blob (the two feathers), independent of exact
+        template shape/size -- far more robust to camera zoom/angle
+        changes than grayscale template matching, since hue is much
+        more stable than silhouette across those changes.
+
+        If `seed_position` is given (the template match's rough guess,
+        in local frame coordinates), the color search is narrowed down
+        to just `bobber_color_fallback_search_radius` around it instead
+        of the whole central bounding box. This matters a lot in
+        practice: real gameplay screenshots contain many small stray
+        blue/red specks (water highlights, distant foliage, etc.), and
+        scanning the full central region made the nearest-pair heuristic
+        prone to latching onto unrelated noise far from the real
+        bobber. Falls back to the full central region only if no seed
+        is available (template not loaded at all).
+
+        Returns the midpoint between the closest blue/red blob pair (in
+        absolute screen coordinates) if one is found within
+        `bobber_color_fallback_max_pair_distance`, else None.
+        """
+        if seed_position is not None:
+            seed_x, seed_y = seed_position
+            r = bobber_color_fallback_search_radius
+            x_start = max(x_start, seed_x - r)
+            x_end = min(x_end, seed_x + r)
+            y_start = max(y_start, seed_y - r)
+            y_end = min(y_end, seed_y + r)
+
+        region_bgr = frame.image[y_start:y_end, x_start:x_end]
+        if region_bgr.size == 0:
             return None
 
-        logger.info("Bobber found at screen (%d, %d), score %.3f (threshold %.3f)",
-                    screen_x, screen_y, max_val, bobber_match_threshold)
-        return screen_x, screen_y
+        hsv = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2HSV)
+        saturation_value_lower = (bobber_color_min_saturation, bobber_color_min_value)
+
+        blue_low, blue_high = bobber_color_blue_hue_range
+        blue_mask = cv2.inRange(hsv, (blue_low,) + saturation_value_lower, (blue_high, 255, 255))
+
+        red_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        for red_low, red_high in bobber_color_red_hue_ranges:
+            red_mask |= cv2.inRange(hsv, (red_low,) + saturation_value_lower, (red_high, 255, 255))
+
+        blue_centroids = ObjectDetection.__blob_centroids(blue_mask)
+        red_centroids = ObjectDetection.__blob_centroids(red_mask)
+
+        if not blue_centroids or not red_centroids:
+            return None
+
+        best_distance = float("inf")
+        best_pair = None
+        for bx, by in blue_centroids:
+            for rx, ry in red_centroids:
+                distance = ((bx - rx) ** 2 + (by - ry) ** 2) ** 0.5
+                if distance < best_distance:
+                    best_distance = distance
+                    best_pair = ((bx, by), (rx, ry))
+
+        if best_pair is None or best_distance > bobber_color_fallback_max_pair_distance:
+            return None
+
+        (bx, by), (rx, ry) = best_pair
+        local_x = int((bx + rx) / 2) + x_start
+        local_y = int((by + ry) / 2) + y_start
+        return frame.origin[0] + local_x, frame.origin[1] + local_y
+
+    @staticmethod
+    def __blob_centroids(mask: np.ndarray) -> list[tuple[float, float]]:
+        """Returns the (x, y) centroid of every connected component in `mask` at least bobber_color_fallback_min_blob_area pixels large."""
+        num_labels, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        return [
+            (centroids[i][0], centroids[i][1])
+            for i in range(1, num_labels)
+            if stats[i, cv2.CC_STAT_AREA] >= bobber_color_fallback_min_blob_area
+        ]
 
     @handle_errors()
     def is_bobber_candidate_static(self, frame_a: ScreenshotFrame, frame_b: ScreenshotFrame,
