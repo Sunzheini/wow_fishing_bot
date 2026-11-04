@@ -13,6 +13,16 @@ screenshot_area = {
     "height": 250,
 }
 wait_time_between_screenshots = 0.2  # delay between consecutive splash-watch screenshots
+# During a long unattended run, one screenshot gets saved per
+# WAITING_FOR_BOBBER/WATCHING_FOR_SPLASH attempt, which adds up fast
+# (a single ~30s splash watch alone saves ~60-150 files). Clearing the
+# whole screenshots folder right before every cast keeps disk usage
+# bounded to roughly "the current cast" at any given time, instead of
+# growing unbounded for the whole session. Defaults to False so the
+# existing debug workflow (inspecting screenshots from any past cast
+# after stopping the bot) keeps working unless explicitly opted into --
+# the manual "Clear Screenshots" GUI button is unaffected either way.
+clear_screenshots_before_each_cast = False
 #endregion
 
 #region Logging Constants

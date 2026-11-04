@@ -10,7 +10,8 @@ from core.screenshot_capture import ScreenshotCapture
 from support.app_logging import get_logger
 from support.constants import max_state_machine_iterations, splash_watch_timeout_seconds, \
     cast_animation_wait_seconds, max_bobber_search_attempts, bobber_search_retry_delay_seconds, \
-    wait_time_between_screenshots, start_delay_seconds, bobber_motion_check_delay_seconds
+    wait_time_between_screenshots, start_delay_seconds, bobber_motion_check_delay_seconds, \
+    clear_screenshots_before_each_cast as default_clear_screenshots_before_each_cast
 
 logger = get_logger(__name__)
 
@@ -47,11 +48,12 @@ class FishingBot:
         """
         Releases OS-level resources (the emergency-stop hotkey hook).
 
-        Does NOT delete saved screenshots -- they're a debugging aid and
-        should only ever be cleared by an explicit user action (e.g. the
-        GUI's "Clear Screenshots" button), never automatically. Deleting
-        them based on *why* the bot stopped was tried and repeatedly
-        got in the way of debugging real detection failures.
+        Does NOT delete saved screenshots on its own -- that's controlled
+        separately by clear_screenshots_before_each_cast (opt-in, cleared
+        right before each cast while running) and the GUI's explicit
+        "Clear Screenshots" button. Deleting them based on *why* the bot
+        stopped was tried and repeatedly got in the way of debugging real
+        detection failures.
         """
         self.emergency_stop.stop_listening()
 
@@ -70,7 +72,8 @@ class FishingBot:
             sleep(1)
         return True
 
-    def run(self, on_state_change: Optional[StateChangeCallback] = None) -> None:
+    def run(self, on_state_change: Optional[StateChangeCallback] = None,
+            clear_screenshots_before_each_cast: bool = default_clear_screenshots_before_each_cast) -> None:
         """
         Runs the fishing state machine until it reaches STOPPED, hits
         max_state_machine_iterations, or a stop is requested.
@@ -78,6 +81,13 @@ class FishingBot:
         Begins with a start_delay_seconds countdown (logged one message
         per second) before the first cast, giving the user time to
         switch focus into the game window.
+
+        If clear_screenshots_before_each_cast is True, every screenshot
+        saved so far is deleted right before each cast (including the
+        very first one), keeping disk usage bounded during long runs at
+        the cost of only ever having the current cast's screenshots
+        available for debugging. Defaults to the clear_screenshots_before_each_cast
+        constant (off by default).
         """
         if not self.__wait_before_starting():
             return  # stop was requested during the countdown
@@ -107,6 +117,8 @@ class FishingBot:
 
             try:
                 if state == FishingState.IDLE:
+                    if clear_screenshots_before_each_cast:
+                        screenshot_capture.clear_screenshots()
                     controls_interaction.cast_fishing_line()
                     splash_watch_attempts = 0
                     splash_watch_start_time = 0.0

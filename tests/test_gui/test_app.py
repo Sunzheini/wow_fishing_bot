@@ -21,7 +21,7 @@ class FakeFishingBot:
         self.run_called_with_callback = None
         FakeFishingBot.instances.append(self)
 
-    def run(self, on_state_change=None):
+    def run(self, on_state_change=None, clear_screenshots_before_each_cast=False):
         self.run_called_with_callback = on_state_change
         if on_state_change is not None:
             on_state_change(FishingState.IDLE)
@@ -207,6 +207,27 @@ def test_clear_screenshots_button_calls_clear_screenshots(app, monkeypatch):
     app._on_clear_screenshots_clicked()
 
     mock_screenshot_capture.clear_screenshots.assert_called_once()
+
+
+def test_clear_screenshots_before_each_cast_checkbox_defaults_to_constant(app):
+    """The checkbox must start in whatever state the constant specifies."""
+    from support.constants import clear_screenshots_before_each_cast
+    assert app.clear_screenshots_before_each_cast_var.get() == clear_screenshots_before_each_cast
+
+
+def test_run_bot_passes_checkbox_value_to_fishing_bot_run(app, monkeypatch):
+    """
+    Toggling the "Clear screenshots before each cast" checkbox must be
+    forwarded to FishingBot.run() so it actually takes effect.
+    """
+    mock_bot = MagicMock()
+    monkeypatch.setattr(gui_app_module, "FishingBot", MagicMock(return_value=mock_bot))
+
+    app.clear_screenshots_before_each_cast_var.set(True)
+    app._run_bot()
+
+    _, kwargs = mock_bot.run.call_args
+    assert kwargs["clear_screenshots_before_each_cast"] is True
 
 
 # ----- Start/Stop button behavior -------------------------------------------

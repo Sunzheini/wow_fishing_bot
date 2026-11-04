@@ -16,7 +16,8 @@ from core.fishing_state import FishingState
 from core.screenshot_capture import ScreenshotCapture
 from support.app_logging import get_logger
 from support.constants import gui_window_title, gui_window_size, gui_poll_interval_ms, \
-    gui_step_color_active, gui_step_color_stopped, gui_step_color_inactive, gui_log_font
+    gui_step_color_active, gui_step_color_stopped, gui_step_color_inactive, gui_log_font, \
+    clear_screenshots_before_each_cast
 from support.window_utils import enable_dpi_awareness
 
 logger = get_logger(__name__)
@@ -129,6 +130,14 @@ class FishingBotApp:
         )
         self.clear_screenshots_button.pack(anchor="e", pady=(5, 0))
 
+        self.clear_screenshots_before_each_cast_var = tk.BooleanVar(value=clear_screenshots_before_each_cast)
+        self.clear_screenshots_before_each_cast_checkbox = ttk.Checkbutton(
+            container,
+            text="Clear screenshots before each cast (keeps only the current cast on disk)",
+            variable=self.clear_screenshots_before_each_cast_var,
+        )
+        self.clear_screenshots_before_each_cast_checkbox.pack(anchor="e", pady=(5, 0))
+
     def _attach_log_queue_handler(self) -> None:
         import logging
         queue_handler = _QueueLogHandler(self.log_queue)
@@ -181,7 +190,10 @@ class FishingBotApp:
     def _run_bot(self) -> None:
         try:
             self.bot = FishingBot()
-            self.bot.run(on_state_change=self.state_queue.put)
+            self.bot.run(
+                on_state_change=self.state_queue.put,
+                clear_screenshots_before_each_cast=self.clear_screenshots_before_each_cast_var.get(),
+            )
         except Exception:
             logger.exception("Fishing bot crashed.")
         finally:

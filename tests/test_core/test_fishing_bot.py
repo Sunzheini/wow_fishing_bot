@@ -88,6 +88,39 @@ def test_happy_path_casts_finds_bobber_detects_splash_and_reels_in(mocks):
     assert FishingState.REELING in state_changes
 
 
+def test_clear_screenshots_before_each_cast_defaults_to_off(mocks):
+    """
+    By default (clear_screenshots_before_each_cast=False), screenshots
+    must never be cleared automatically by run() -- only the explicit
+    GUI button does that.
+    """
+    mocks["object_detection"].find_bobber.return_value = None
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 3) + [True] * 100
+
+    FishingBot().run()
+
+    mocks["screenshot_capture"].clear_screenshots.assert_not_called()
+
+
+def test_clear_screenshots_before_each_cast_clears_before_every_cast_when_enabled(mocks):
+    """
+    When clear_screenshots_before_each_cast=True is passed to run(),
+    clear_screenshots() must be called exactly once per IDLE->CASTING
+    transition (i.e. once per cast, including the very first one).
+    """
+    mocks["object_detection"].find_bobber.return_value = None
+    # Let 2 full recast cycles happen (IDLE, CASTING, WAITING_FOR_BOBBER x10
+    # each failing to find a bobber -> back to IDLE) before stopping.
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 26) + [True] * 100
+
+    FishingBot().run(clear_screenshots_before_each_cast=True)
+
+    assert mocks["screenshot_capture"].clear_screenshots.call_count == mocks[
+        "controls_interaction"].cast_fishing_line.call_count
+    assert mocks["screenshot_capture"].clear_screenshots.call_count >= 2
+
+
+
 def test_recasts_after_max_bobber_search_attempts_when_bobber_never_found(mocks, monkeypatch):
     """
     If find_bobber() always returns None, the state machine must give up
