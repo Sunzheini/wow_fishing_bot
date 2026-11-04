@@ -87,3 +87,18 @@ class ScreenshotCapture:
                 timestamp=time(),
                 origin=(region["left"], region["top"])
             )
+
+    @handle_errors()
+    def clear_screenshots(self) -> None:
+        """
+        Deletes every screenshot saved so far in output_dir. Intended to
+        be called when the bot stops, since the screenshots are only a
+        debugging/analysis aid during a run and can pile up quickly
+        (one file every wait_time_between_screenshots while watching
+        for a splash).
+        """
+        deleted_count = 0
+        for png_file in self.output_dir.glob("*.png"):
+            png_file.unlink()
+            deleted_count += 1
+        logger.info("Cleared %d screenshot(s) from %s", deleted_count, self.output_dir)

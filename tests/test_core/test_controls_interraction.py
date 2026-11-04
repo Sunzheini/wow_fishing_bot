@@ -4,7 +4,7 @@ import pytest
 
 import core.controls_interaction as controls_interaction_module
 from support.constants import fishing_keybind, key_press_duration, mouse_move_duration, \
-    reel_click_button, reel_click_modifier_key
+    reel_click_button, reel_click_modifier_key, wow_window_title_substring
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +23,17 @@ def mock_sleep(monkeypatch):
     """Avoids real delays from time.sleep() during tests."""
     mock = MagicMock()
     monkeypatch.setattr(controls_interaction_module.time, "sleep", mock)
+    return mock
+
+
+@pytest.fixture(autouse=True)
+def mock_focus_window(monkeypatch):
+    """
+    Replaces the real window-focusing call with a MagicMock, so tests
+    never actually enumerate/focus windows on the real desktop.
+    """
+    mock = MagicMock(return_value=True)
+    monkeypatch.setattr(controls_interaction_module, "focus_window_by_title_substring", mock)
     return mock
 
 
@@ -77,6 +88,31 @@ def test_reel_in_bobber_releases_modifier_key_even_if_click_fails(objects, mock_
         controls_interaction.reel_in_bobber((10, 20))
 
     mock_pydirectinput.keyUp.assert_called_once_with(reel_click_modifier_key)
+
+
+def test_cast_fishing_line_focuses_wow_window_before_pressing_key(objects, mock_focus_window):
+    """
+    cast_fishing_line() must bring the WoW window to the foreground
+    before sending the key press, so input reliably reaches the game
+    even if this app's own GUI currently has OS focus.
+    """
+    controls_interaction = objects['controls_interaction']
+
+    controls_interaction.cast_fishing_line()
+
+    mock_focus_window.assert_called_once_with(wow_window_title_substring)
+
+
+def test_reel_in_bobber_focuses_wow_window_before_clicking(objects, mock_focus_window):
+    """
+    reel_in_bobber() must bring the WoW window to the foreground before
+    moving the mouse and clicking.
+    """
+    controls_interaction = objects['controls_interaction']
+
+    controls_interaction.reel_in_bobber((10, 20))
+
+    mock_focus_window.assert_called_once_with(wow_window_title_substring)
 
 
 def test_cast_fishing_line_propagates_errors_via_handle_errors(objects, mock_pydirectinput):

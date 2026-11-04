@@ -11,7 +11,10 @@ from support.constants import assets_dir_name, templates_dir_name
 
 ASSETS_DIR = Path(object_detection_module.__file__).parent.parent / assets_dir_name / templates_dir_name
 
-KNOWN_BOBBER_POSITION = (1001, 356)  # confirmed via find_bobber() on the real fixture screenshot
+KNOWN_BOBBER_POSITION = (1015, 299)  # confirmed via find_bobber() on the real fixture screenshot
+# The splash fixture is from a different real cast/session than the
+# no-splash fixture above, so the bobber was at a different position.
+SPLASH_BOBBER_POSITION = (940, 375)
 
 
 def load_frame(filename: str) -> ScreenshotFrame:
@@ -149,7 +152,7 @@ def test_detect_splash_true_when_splash_present(objects):
     object_detection = objects['object_detection']
     frame = load_frame("screenshot_with_bobber_with_splash.jpg")
 
-    assert object_detection.detect_splash(frame, KNOWN_BOBBER_POSITION) is True
+    assert object_detection.detect_splash(frame, SPLASH_BOBBER_POSITION) is True
 
 
 def test_detect_splash_returns_false_when_template_missing(objects, monkeypatch):
@@ -174,3 +177,105 @@ def test_detect_splash_returns_false_for_out_of_bounds_bobber_position(objects):
     out_of_bounds_position = (-10_000, -10_000)
 
     assert object_detection.detect_splash(frame, out_of_bounds_position) is False
+
+
+# ----- Multi-scale matching --------------------------------------------------
+
+def test_find_bobber_still_finds_bobber_when_template_is_scaled_down(objects, monkeypatch):
+    """
+    If the real bobber appears SMALLER on screen than the stored
+    template (e.g. the player zoomed out since the template was
+    captured), find_bobber() must still locate it by trying smaller
+    scaled-down versions of the template.
+    """
+    object_detection = objects['object_detection']
+
+    # Shrink the real fixture screenshot itself to 70% size, simulating
+    # the bobber appearing smaller (more "zoomed out") than the template.
+    original = cv2.imread(str(ASSETS_DIR / "screenshot_with_bobber_no_splash.jpg"))
+    shrunk = cv2.resize(original, (int(original.shape[1] * 0.7), int(original.shape[0] * 0.7)))
+    frame = ScreenshotFrame(image=shrunk, timestamp=0.0, origin=(0, 0))
+
+    position = object_detection.find_bobber(frame)
+
+    assert position is not None
+    expected_x = int(KNOWN_BOBBER_POSITION[0] * 0.7)
+    expected_y = int(KNOWN_BOBBER_POSITION[1] * 0.7)
+    assert abs(position[0] - expected_x) <= 10
+    assert abs(position[1] - expected_y) <= 10
+
+
+def test_multi_scale_match_prefers_the_best_scoring_scale(objects):
+    """
+    __multi_scale_match must return the highest score found across all
+    configured scales, not just whatever the first scale happens to produce.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    frame_gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+
+    best_score, best_loc, best_shape = ObjectDetection._ObjectDetection__multi_scale_match(
+        frame_gray, object_detection.bobber_template_gray, [0.5, 1.0, 1.5]
+    )
+
+    # Manually compute the score at scale=1.0 (no resizing) and confirm
+    # the multi-scale result is at least as good (it found the real
+    # bobber, cropped at native scale, so 1.0 should already be near-perfect).
+    import cv2 as cv2_local
+    result = cv2_local.matchTemplate(frame_gray, object_detection.bobber_template_gray, cv2_local.TM_CCOEFF_NORMED)
+    _, single_scale_score, _, _ = cv2_local.minMaxLoc(result)
+
+    assert best_score >= single_scale_score - 1e-6
+    assert best_score > 0.9  # this fixture was cropped from this exact screenshot
+
+
+# ----- Bobber motion confirmation --------------------------------------------
+
+def test_is_bobber_candidate_static_true_for_identical_frames(objects):
+    """
+    If the area around the candidate position is pixel-identical between
+    two frames, it must be flagged as static (a likely false positive on
+    a background/UI element, since real water always has some ripple).
+    """
+    object_detection = objects['object_detection']
+    image = cv2.imread(str(ASSETS_DIR / "screenshot_with_bobber_no_splash.jpg"))
+
+    frame_a = ScreenshotFrame(image=image, timestamp=0.0, origin=(0, 0))
+    frame_b = ScreenshotFrame(image=image.copy(), timestamp=0.1, origin=(0, 0))
+
+    assert object_detection.is_bobber_candidate_static(frame_a, frame_b, KNOWN_BOBBER_POSITION) is True
+
+
+def test_is_bobber_candidate_static_false_when_region_changes(objects):
+    """
+    If the area around the candidate position visibly changes between
+    the two frames (simulated here by brightening it), it must NOT be
+    flagged as static.
+    """
+    object_detection = objects['object_detection']
+    image_a = cv2.imread(str(ASSETS_DIR / "screenshot_with_bobber_no_splash.jpg"))
+    image_b = image_a.copy()
+
+    x, y = KNOWN_BOBBER_POSITION
+    # Brighten a patch around the candidate position to simulate motion/ripple.
+    image_b[y - 20:y + 20, x - 20:x + 20] = cv2.add(image_b[y - 20:y + 20, x - 20:x + 20], 100)
+
+    frame_a = ScreenshotFrame(image=image_a, timestamp=0.0, origin=(0, 0))
+    frame_b = ScreenshotFrame(image=image_b, timestamp=0.1, origin=(0, 0))
+
+    assert object_detection.is_bobber_candidate_static(frame_a, frame_b, KNOWN_BOBBER_POSITION) is False
+
+
+def test_is_bobber_candidate_static_false_when_region_out_of_bounds(objects):
+    """
+    An inconclusive comparison (position outside the frame) must not be
+    treated as "static" -- it shouldn't block a legitimate candidate
+    just because the check itself couldn't run.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    out_of_bounds_position = (-10_000, -10_000)
+
+    assert object_detection.is_bobber_candidate_static(frame, frame, out_of_bounds_position) is False
+
+

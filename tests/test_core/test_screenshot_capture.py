@@ -10,8 +10,7 @@ import core.screenshot_capture as screenshot_capture_module
 from core.screenshot_capture import ScreenshotCapture
 from core.screenshot_frame import ScreenshotFrame
 from support.app_error_handling import InvalidMonitorError
-from support.constants import screenshots_output_dir_name, screenshot_area, \
-    monitor_number_where_the_screenshot_is_taken
+from support.constants import screenshot_area, monitor_number_where_the_screenshot_is_taken
 
 
 FILENAME_PATTERN = re.compile(
@@ -33,7 +32,7 @@ def clear_png_files_before_each_test():
     Ensures each test starts with an empty output directory by removing
     any leftover PNG files before it runs.
     """
-    output_dir = Path(screenshot_capture_module.__file__).parent.parent / screenshots_output_dir_name
+    output_dir = Path(screenshot_capture_module.__file__).parent.parent / screenshot_capture_module.screenshots_output_dir_name
     if output_dir.exists():
         for png_file in output_dir.glob("*.png"):
             png_file.unlink()
@@ -46,7 +45,7 @@ def test_output_dir_is_created(objects):
     """
     screenshot_capture = objects['screenshot_capture']
 
-    expected_dir = Path(screenshot_capture_module.__file__).parent.parent / screenshots_output_dir_name
+    expected_dir = Path(screenshot_capture_module.__file__).parent.parent / screenshot_capture_module.screenshots_output_dir_name
     assert screenshot_capture.output_dir == expected_dir
     assert screenshot_capture.output_dir.exists()
 
@@ -237,6 +236,31 @@ def test_capture_screenshot_full_screen_matches_monitor_dimensions(objects):
     assert frame.image.shape[1] == mon["width"]
 
 
+def test_clear_screenshots_removes_all_png_files(objects):
+    """
+    clear_screenshots() must delete every PNG file previously saved by
+    capture_screenshot(), leaving the output directory empty (but intact).
+    """
+    screenshot_capture = objects['screenshot_capture']
+    for screenshot_number in range(3):
+        screenshot_capture.capture_screenshot(screenshot_number)
+
+    assert len(list(screenshot_capture.output_dir.glob("*.png"))) == 3
+
+    screenshot_capture.clear_screenshots()
+
+    assert list(screenshot_capture.output_dir.glob("*.png")) == []
+    assert screenshot_capture.output_dir.exists()  # the directory itself remains
+
+
+def test_clear_screenshots_does_not_raise_when_directory_already_empty(objects):
+    """clear_screenshots() on an already-empty directory must not raise."""
+    screenshot_capture = objects['screenshot_capture']
+    assert list(screenshot_capture.output_dir.glob("*.png")) == []
+
+    screenshot_capture.clear_screenshots()  # should not raise
+
+
 @pytest.fixture(scope="session", autouse=True)
 def screenshot_capture_teardown():
     """
@@ -244,6 +268,6 @@ def screenshot_capture_teardown():
     """
     yield # All tests have run at this point, so we can perform any necessary cleanup here.
 
-    output_dir = Path(screenshot_capture_module.__file__).parent.parent / screenshots_output_dir_name
+    output_dir = Path(screenshot_capture_module.__file__).parent.parent / screenshot_capture_module.screenshots_output_dir_name
     if output_dir.exists():
         shutil.rmtree(output_dir)
