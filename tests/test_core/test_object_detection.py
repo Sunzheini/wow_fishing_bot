@@ -11,7 +11,7 @@ from support.constants import assets_dir_name, templates_dir_name
 
 ASSETS_DIR = Path(object_detection_module.__file__).parent.parent / assets_dir_name / templates_dir_name
 
-KNOWN_BOBBER_POSITION = (1015, 299)  # confirmed via find_bobber() on the real fixture screenshot
+KNOWN_BOBBER_POSITION = (944, 401)  # confirmed via find_bobber() on the real fixture screenshot
 # The splash fixture is from a different real cast/session than the
 # no-splash fixture above, so the bobber was at a different position.
 SPLASH_BOBBER_POSITION = (940, 375)
@@ -266,5 +266,44 @@ def test_is_bobber_candidate_static_false_when_region_out_of_bounds(objects):
     out_of_bounds_position = (-10_000, -10_000)
 
     assert object_detection.is_bobber_candidate_static(frame, frame, out_of_bounds_position) is False
+
+
+# ----- Bobber feather color confirmation --------------------------------------
+
+def test_has_bobber_feather_colors_true_at_the_real_bobber_position(objects):
+    """
+    The real bobber position must have both the blue and red feather
+    colors detected nearby.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+
+    assert object_detection.has_bobber_feather_colors(frame, KNOWN_BOBBER_POSITION) is True
+
+
+def test_has_bobber_feather_colors_false_on_plain_water(objects):
+    """
+    A position over plain water (no bobber at all) must not have the
+    feather colors detected -- real water lacks the saturated blue/red
+    hues entirely.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_no_bobber.jpg")
+
+    # Same coordinates as the (now patched-over) bobber position in the
+    # synthetic no-bobber fixture.
+    assert object_detection.has_bobber_feather_colors(frame, KNOWN_BOBBER_POSITION) is False
+
+
+def test_has_bobber_feather_colors_true_when_region_out_of_bounds(objects):
+    """
+    An inconclusive check (position outside the frame) must not block a
+    legitimate candidate just because the check itself couldn't run.
+    """
+    object_detection = objects['object_detection']
+    frame = load_frame("screenshot_with_bobber_no_splash.jpg")
+    out_of_bounds_position = (-10_000, -10_000)
+
+    assert object_detection.has_bobber_feather_colors(frame, out_of_bounds_position) is True
 
 

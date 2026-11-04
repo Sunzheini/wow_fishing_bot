@@ -40,8 +40,10 @@ def mocks(monkeypatch):
     emergency_stop.is_stop_requested.return_value = False
 
     # Default: any found bobber candidate passes the motion check (real
-    # water, not a static false positive), unless a test overrides it.
+    # water, not a static false positive) and the color check (feather
+    # colors present), unless a test overrides it.
     object_detection.is_bobber_candidate_static.return_value = False
+    object_detection.has_bobber_feather_colors.return_value = True
 
     # capture_screenshot just needs to return some ScreenshotFrame; content doesn't matter
     # since object_detection is fully mocked too.
@@ -128,6 +130,29 @@ def test_rejects_static_bobber_candidate_and_keeps_searching(mocks, monkeypatch)
 
     assert mocks["object_detection"].find_bobber.call_count == 3
     assert mocks["object_detection"].is_bobber_candidate_static.call_count == 3
+    mocks["controls_interaction"].reel_in_bobber.assert_not_called()
+
+
+def test_rejects_bobber_candidate_missing_feather_colors_and_keeps_searching(mocks, monkeypatch):
+    """
+    If find_bobber() returns a candidate that passes the motion check
+    but has_bobber_feather_colors() says the distinctive blue/red
+    feather colors are missing nearby (a likely false positive, e.g.
+    plain water coincidentally resembling the template), the state
+    machine must reject it and keep searching rather than committing.
+    """
+    monkeypatch.setattr(fishing_bot_module, "max_bobber_search_attempts", 3)
+    mocks["object_detection"].find_bobber.return_value = (123, 456)
+    mocks["object_detection"].is_bobber_candidate_static.return_value = False
+    mocks["object_detection"].has_bobber_feather_colors.return_value = False
+
+    # Same cycle shape as the "bobber never found" recast test above.
+    mocks["emergency_stop"].is_stop_requested.side_effect = [False] * (start_delay_seconds + 6) + [True] * 100
+
+    FishingBot().run()
+
+    assert mocks["object_detection"].find_bobber.call_count == 3
+    assert mocks["object_detection"].has_bobber_feather_colors.call_count == 3
     mocks["controls_interaction"].reel_in_bobber.assert_not_called()
 
 

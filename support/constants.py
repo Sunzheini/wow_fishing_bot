@@ -53,12 +53,36 @@ bobber_motion_min_diff = 15  # min per-pixel BGR-sum difference required to call
 assets_dir_name = "assets"
 templates_dir_name = "templates"
 bobber_template_file_name = "bobber.jpg"  # cropped reference image of the bobber icon/float
-bobber_match_threshold = 0.65  # cv2.matchTemplate TM_CCOEFF_NORMED score required to accept a match
+bobber_match_threshold = 0.70  # cv2.matchTemplate TM_CCOEFF_NORMED score required to accept a match
 # The bobber's apparent on-screen size varies with camera zoom, which the
 # player can change between casts/sessions. Instead of needing a template
 # recropped for the exact current zoom, search multiple scaled versions
 # of the template and keep whichever scores best.
 bobber_match_scales = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8]
+# The player always casts toward the water roughly in the center of the
+# screen, never right at the very top (which only ever shows sky/wall/UI
+# elements like minimap icons -- one of which was confirmed to
+# consistently produce a false-positive template match score close to
+# real bobber detections). Excluding this top strip from the search
+# entirely is more robust than just raising the match threshold, since
+# real bobber scores can sometimes be just as low.
+bobber_search_exclude_top_fraction = 0.12  # fraction of frame height excluded from the top of the search
+
+# The bobber's two feathers have distinctive, saturated blue and red
+# colors that plain water never has -- template matching alone works on
+# grayscale and ignores this entirely. As an additional confirmation
+# step (alongside the motion check), verify that a candidate position
+# actually has both colors nearby. Calibrated directly against the real
+# bobber.jpg template (100 blue / 25 red pixels out of 644 total) vs. a
+# plain water patch (0 of each) -- clean separation, so fairly generous
+# minimums still safely reject pure water false positives.
+bobber_color_check_radius = 15  # pixels around the candidate position to inspect for feather colors
+bobber_color_min_saturation = 40  # HSV saturation required to count as a "colorful" (non-water) pixel
+bobber_color_min_value = 40  # HSV value (brightness) required to count as a "colorful" pixel
+bobber_color_blue_hue_range = (95, 140)  # HSV hue range (0-179) for the blue feather
+bobber_color_red_hue_ranges = [(0, 12), (168, 179)]  # HSV hue wraps around 0/179 for red
+bobber_color_min_blue_pixels = 5  # minimum blue pixels required in the region
+bobber_color_min_red_pixels = 3  # minimum red pixels required in the region
 
 # The splash is a randomly-scattered particle/foam effect -- the
 # relative positions of its bright pixels differ every time, even
@@ -78,7 +102,7 @@ splash_pixel_ratio_threshold = 0.002  # fraction of bright pixels in the region 
 #region Controls Interaction Constants
 fishing_keybind = "1"  # keyboard key bound to the fishing spell/action bar slot
 key_press_duration = 0.05  # seconds to hold the fishing key down
-mouse_move_duration = 0.1  # seconds for the mouse to travel to the bobber position
+mouse_move_duration = 0.05  # seconds for the mouse to travel to the bobber position
 reel_click_button = "right"  # mouse button used to interact with / reel in the bobber
 reel_click_modifier_key = "shift"  # held during the reel click to trigger WoW's auto-loot
 # pydirectinput's click() performs mouseDown+mouseUp almost instantly. Some
@@ -86,22 +110,24 @@ reel_click_modifier_key = "shift"  # held during the reel click to trigger WoW's
 # that wasn't held for at least a few ms before/during the click, so the
 # right-click registers but Shift isn't seen -> reels in without looting.
 # These delays ensure Shift is clearly down before the click starts and
-# still down for a moment after it ends.
-reel_modifier_press_delay = 0.15  # held after keyDown(shift), before the mouse click starts
-reel_click_hold_duration = 0.08  # how long the mouse button itself stays down
-reel_modifier_release_delay = 0.15  # held after the click ends, before keyUp(shift)
+# still down for a moment after it ends. (Looting is now confirmed
+# working in practice, so these were trimmed down from more cautious
+# initial values -- just enough margin, not excessive.)
+reel_modifier_press_delay = 0.05  # held after keyDown(shift), before the mouse click starts
+reel_click_hold_duration = 0.04  # how long the mouse button itself stays down
+reel_modifier_release_delay = 0.05  # held after the click ends, before keyUp(shift)
 # WoW's clickable hitbox for the fishing bobber is notoriously tiny (a
 # few pixels), while the detected position is only the center of the
 # visual template match, which can be slightly offset from the real
-# interactable point. Instead of a single click, try several nearby
-# points in a small cross/grid pattern around the detected position to
-# greatly increase the odds of actually landing on the bobber -- any
-# clicks that miss just land harmlessly on water.
+# interactable point. A small cross spray around the detected position
+# greatly increases the odds of landing on the bobber -- any clicks
+# that miss just land harmlessly on water. Trimmed to a tighter 5-point
+# cross (center + 4 adjacent points) now that looting is confirmed
+# working, since the 9-point version made each reel-in take ~5s.
 reel_click_spray_offsets = [
     (0, 0), (0, -4), (0, 4), (-4, 0), (4, 0),
-    (-3, -3), (3, -3), (-3, 3), (3, 3),
 ]
-reel_click_spray_delay = 0.12  # pause between consecutive spray click attempts
+reel_click_spray_delay = 0.05  # pause between consecutive spray click attempts
 wow_window_title_substring = "World of Warcraft"  # used to find & focus the game window before sending input
 #endregion
 

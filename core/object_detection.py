@@ -8,8 +8,10 @@ from core.screenshot_frame import ScreenshotFrame
 from support.app_error_handling import TemplateNotFoundError, handle_errors
 from support.app_logging import get_logger
 from support.constants import assets_dir_name, templates_dir_name, bobber_template_file_name, \
-    bobber_match_threshold, bobber_match_scales, bobber_motion_check_radius, bobber_motion_min_diff, \
-    splash_region_radius, splash_brightness_threshold, splash_pixel_ratio_threshold
+    bobber_match_threshold, bobber_match_scales, bobber_search_exclude_top_fraction, bobber_motion_check_radius, \
+    bobber_motion_min_diff, bobber_color_check_radius, bobber_color_min_saturation, bobber_color_min_value, \
+    bobber_color_blue_hue_range, bobber_color_red_hue_ranges, bobber_color_min_blue_pixels, \
+    bobber_color_min_red_pixels, splash_region_radius, splash_brightness_threshold, splash_pixel_ratio_threshold
 
 logger = get_logger(__name__)
 
@@ -102,11 +104,21 @@ class ObjectDetection:
         bobber.jpg was captured and the current session). Returns the
         bobber's (x, y) position in absolute screen coordinates, or None
         if no sufficiently confident match is found at any scale.
+
+        The top `bobber_search_exclude_top_fraction` of the frame is
+        excluded from the search entirely: the bobber is always cast
+        toward the water near screen center, never at the very top
+        (which only shows sky/wall/UI elements) -- one of which was
+        confirmed to otherwise produce a persistent false-positive match.
         """
         if self.bobber_template_gray is None:
             return None
 
-        frame_gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+        frame_gray_full = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
+        full_height = frame_gray_full.shape[0]
+        top_exclude_pixels = int(full_height * bobber_search_exclude_top_fraction)
+        frame_gray = frame_gray_full[top_exclude_pixels:, :]
+
         template_height, template_width = self.bobber_template_gray.shape[:2]
 
         if frame_gray.shape[0] < template_height or frame_gray.shape[1] < template_width:
@@ -118,7 +130,7 @@ class ObjectDetection:
         )
 
         local_x = max_loc[0] + matched_width // 2
-        local_y = max_loc[1] + matched_height // 2
+        local_y = max_loc[1] + matched_height // 2 + top_exclude_pixels
         screen_x = frame.origin[0] + local_x
         screen_y = frame.origin[1] + local_y
 
@@ -160,6 +172,51 @@ class ObjectDetection:
                     position, max_diff, bobber_motion_min_diff, "STATIC (likely false positive)" if is_static
                     else "moving (real water)")
         return is_static
+
+    @handle_errors()
+    def has_bobber_feather_colors(self, frame: ScreenshotFrame, position: tuple[int, int]) -> bool:
+        """
+        Returns True if a small area around `position` contains both a
+        blue-ish and a red-ish pixel cluster, matching the bobber's two
+        distinctive feather colors.
+
+        Template matching works purely on grayscale and ignores color
+        entirely. Plain water never has these saturated colors, so this
+        is a strong additional confirmation signal (alongside the motion
+        check) to reject false positives. Calibrated directly against
+        the real bobber.jpg template (100 blue / 25 red pixels out of
+        644 total) vs. a plain water patch (0 of each).
+        """
+        region = self.__extract_region(frame, position, bobber_color_check_radius)
+        if region is None:
+            # Can't check -- don't block on an inconclusive check.
+            return True
+
+        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+        saturation_value_lower = (0, bobber_color_min_saturation, bobber_color_min_value)
+        saturation_value_upper = (0, 255, 255)
+
+        blue_low, blue_high = bobber_color_blue_hue_range
+        blue_mask = cv2.inRange(
+            hsv, (blue_low,) + saturation_value_lower[1:], (blue_high,) + saturation_value_upper[1:]
+        )
+        blue_count = int(np.count_nonzero(blue_mask))
+
+        red_count = 0
+        for red_low, red_high in bobber_color_red_hue_ranges:
+            red_mask = cv2.inRange(
+                hsv, (red_low,) + saturation_value_lower[1:], (red_high,) + saturation_value_upper[1:]
+            )
+            red_count += int(np.count_nonzero(red_mask))
+
+        has_colors = blue_count >= bobber_color_min_blue_pixels and red_count >= bobber_color_min_red_pixels
+
+        logger.info(
+            "Color check near %s: blue=%d (min %d), red=%d (min %d) -> %s",
+            position, blue_count, bobber_color_min_blue_pixels, red_count, bobber_color_min_red_pixels,
+            "feather colors present" if has_colors else "MISSING (likely false positive)"
+        )
+        return has_colors
 
     @staticmethod
     def __extract_region(frame: ScreenshotFrame, position: tuple[int, int], radius: int) -> Optional[np.ndarray]:

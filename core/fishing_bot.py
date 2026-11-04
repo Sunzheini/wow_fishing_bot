@@ -140,6 +140,10 @@ class FishingBot:
                             logger.warning("Rejecting bobber candidate at %s: area is static (likely a "
                                             "false positive, not real water).", candidate_position)
                             candidate_position = None
+                        elif not object_detection.has_bobber_feather_colors(screenshot_frame, candidate_position):
+                            logger.warning("Rejecting bobber candidate at %s: missing feather colors "
+                                            "(likely a false positive).", candidate_position)
+                            candidate_position = None
 
                     bobber_position = candidate_position
 
